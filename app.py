@@ -229,4 +229,3 @@ if st.button("Ask AI"):
                 f"{i}. {source['section']} "
                 f"(Chunk ID: {source['chunk_id']})"
             )
-```
