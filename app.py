@@ -1,3 +1,4 @@
+```python
 import os
 import json
 import faiss
@@ -114,8 +115,7 @@ Content:
 
     context = "\n".join(context_parts)
 
-    ```python
-prompt = f"""
+    prompt = f"""
 You are the AI assistant for the Shipra.Backend.API project.
 
 Use the project documentation as the PRIMARY SOURCE for answering the user's question.
@@ -129,8 +129,8 @@ IMPORTANT RULES:
 
 2. If the documentation does NOT contain enough information:
    - Do NOT simply refuse to answer.
-   - Use your general software engineering knowledge to suggest the most suitable solution.
-   - Clearly label it as "Recommended Solution".
+   - Use your general software engineering and programming knowledge to suggest the most suitable solution.
+   - Clearly label this section as "Recommended Solution".
    - Any new code you create must be labeled as "Example Code".
 
 3. Never present assumptions or recommendations as existing project facts.
@@ -148,7 +148,8 @@ IMPORTANT RULES:
 
 7. Explain technical concepts in simple language.
 
-8. If multiple approaches are possible, recommend the most suitable approach first.
+8. If multiple approaches are possible:
+   - Recommend the most suitable approach first.
 
 9. Keep the answer focused on the user's question.
 
@@ -164,7 +165,6 @@ USER QUESTION:
 {question}
 """
 
-"""
     models_to_try = [
         "gemini-3.6-flash",
         "gemini-3.5-flash",
@@ -176,7 +176,9 @@ USER QUESTION:
     last_error = None
 
     for model_name in models_to_try:
+
         try:
+
             response = client.models.generate_content(
                 model=model_name,
                 contents=prompt
@@ -185,6 +187,7 @@ USER QUESTION:
             return response.text, results
 
         except Exception as e:
+
             last_error = e
             continue
 
@@ -227,3 +230,4 @@ if st.button("Ask AI"):
                 f"{i}. {source['section']} "
                 f"(Chunk ID: {source['chunk_id']})"
             )
+```
