@@ -1,0 +1,367 @@
+[
+  {
+    "section_index": 0,
+    "section_title": "# Shipra.Backend.API — Complete Project Documentation",
+    "chunk_index": 0
+  },
+  {
+    "section_index": 1,
+    "section_title": "# PART 1 — Overview",
+    "chunk_index": 1
+  },
+  {
+    "section_index": 2,
+    "section_title": "# Shipra.Backend.API",
+    "chunk_index": 2
+  },
+  {
+    "section_index": 2,
+    "section_title": "# Shipra.Backend.API",
+    "chunk_index": 3
+  },
+  {
+    "section_index": 2,
+    "section_title": "# Shipra.Backend.API",
+    "chunk_index": 4
+  },
+  {
+    "section_index": 2,
+    "section_title": "# Shipra.Backend.API",
+    "chunk_index": 5
+  },
+  {
+    "section_index": 2,
+    "section_title": "# Shipra.Backend.API",
+    "chunk_index": 6
+  },
+  {
+    "section_index": 3,
+    "section_title": "# PART 2 — Specification",
+    "chunk_index": 7
+  },
+  {
+    "section_index": 4,
+    "section_title": "# Specification — Shipra.Backend.API",
+    "chunk_index": 8
+  },
+  {
+    "section_index": 4,
+    "section_title": "# Specification — Shipra.Backend.API",
+    "chunk_index": 9
+  },
+  {
+    "section_index": 4,
+    "section_title": "# Specification — Shipra.Backend.API",
+    "chunk_index": 10
+  },
+  {
+    "section_index": 4,
+    "section_title": "# Specification — Shipra.Backend.API",
+    "chunk_index": 11
+  },
+  {
+    "section_index": 4,
+    "section_title": "# Specification — Shipra.Backend.API",
+    "chunk_index": 12
+  },
+  {
+    "section_index": 4,
+    "section_title": "# Specification — Shipra.Backend.API",
+    "chunk_index": 13
+  },
+  {
+    "section_index": 4,
+    "section_title": "# Specification — Shipra.Backend.API",
+    "chunk_index": 14
+  },
+  {
+    "section_index": 4,
+    "section_title": "# Specification — Shipra.Backend.API",
+    "chunk_index": 15
+  },
+  {
+    "section_index": 5,
+    "section_title": "# PART 3 — Requirements",
+    "chunk_index": 16
+  },
+  {
+    "section_index": 6,
+    "section_title": "# Requirements — Shipra.Backend.API",
+    "chunk_index": 17
+  },
+  {
+    "section_index": 6,
+    "section_title": "# Requirements — Shipra.Backend.API",
+    "chunk_index": 18
+  },
+  {
+    "section_index": 6,
+    "section_title": "# Requirements — Shipra.Backend.API",
+    "chunk_index": 19
+  },
+  {
+    "section_index": 6,
+    "section_title": "# Requirements — Shipra.Backend.API",
+    "chunk_index": 20
+  },
+  {
+    "section_index": 6,
+    "section_title": "# Requirements — Shipra.Backend.API",
+    "chunk_index": 21
+  },
+  {
+    "section_index": 6,
+    "section_title": "# Requirements — Shipra.Backend.API",
+    "chunk_index": 22
+  },
+  {
+    "section_index": 6,
+    "section_title": "# Requirements — Shipra.Backend.API",
+    "chunk_index": 23
+  },
+  {
+    "section_index": 7,
+    "section_title": "# PART 4 — Business Logic (Code Walkthrough)",
+    "chunk_index": 24
+  },
+  {
+    "section_index": 8,
+    "section_title": "# Business Logic — Shipra.Backend.API (Code Walkthrough)",
+    "chunk_index": 25
+  },
+  {
+    "section_index": 8,
+    "section_title": "# Business Logic — Shipra.Backend.API (Code Walkthrough)",
+    "chunk_index": 26
+  },
+  {
+    "section_index": 8,
+    "section_title": "# Business Logic — Shipra.Backend.API (Code Walkthrough)",
+    "chunk_index": 27
+  },
+  {
+    "section_index": 8,
+    "section_title": "# Business Logic — Shipra.Backend.API (Code Walkthrough)",
+    "chunk_index": 28
+  },
+  {
+    "section_index": 8,
+    "section_title": "# Business Logic — Shipra.Backend.API (Code Walkthrough)",
+    "chunk_index": 29
+  },
+  {
+    "section_index": 8,
+    "section_title": "# Business Logic — Shipra.Backend.API (Code Walkthrough)",
+    "chunk_index": 30
+  },
+  {
+    "section_index": 8,
+    "section_title": "# Business Logic — Shipra.Backend.API (Code Walkthrough)",
+    "chunk_index": 31
+  },
+  {
+    "section_index": 8,
+    "section_title": "# Business Logic — Shipra.Backend.API (Code Walkthrough)",
+    "chunk_index": 32
+  },
+  {
+    "section_index": 8,
+    "section_title": "# Business Logic — Shipra.Backend.API (Code Walkthrough)",
+    "chunk_index": 33
+  },
+  {
+    "section_index": 8,
+    "section_title": "# Business Logic — Shipra.Backend.API (Code Walkthrough)",
+    "chunk_index": 34
+  },
+  {
+    "section_index": 8,
+    "section_title": "# Business Logic — Shipra.Backend.API (Code Walkthrough)",
+    "chunk_index": 35
+  },
+  {
+    "section_index": 8,
+    "section_title": "# Business Logic — Shipra.Backend.API (Code Walkthrough)",
+    "chunk_index": 36
+  },
+  {
+    "section_index": 8,
+    "section_title": "# Business Logic — Shipra.Backend.API (Code Walkthrough)",
+    "chunk_index": 37
+  },
+  {
+    "section_index": 8,
+    "section_title": "# Business Logic — Shipra.Backend.API (Code Walkthrough)",
+    "chunk_index": 38
+  },
+  {
+    "section_index": 8,
+    "section_title": "# Business Logic — Shipra.Backend.API (Code Walkthrough)",
+    "chunk_index": 39
+  },
+  {
+    "section_index": 8,
+    "section_title": "# Business Logic — Shipra.Backend.API (Code Walkthrough)",
+    "chunk_index": 40
+  },
+  {
+    "section_index": 9,
+    "section_title": "# PART 5 — Technical Implementation Plan",
+    "chunk_index": 41
+  },
+  {
+    "section_index": 10,
+    "section_title": "# Technical Implementation Plan — Shipra.Backend.API",
+    "chunk_index": 42
+  },
+  {
+    "section_index": 10,
+    "section_title": "# Technical Implementation Plan — Shipra.Backend.API",
+    "chunk_index": 43
+  },
+  {
+    "section_index": 10,
+    "section_title": "# Technical Implementation Plan — Shipra.Backend.API",
+    "chunk_index": 44
+  },
+  {
+    "section_index": 10,
+    "section_title": "# Technical Implementation Plan — Shipra.Backend.API",
+    "chunk_index": 45
+  },
+  {
+    "section_index": 10,
+    "section_title": "# Technical Implementation Plan — Shipra.Backend.API",
+    "chunk_index": 46
+  },
+  {
+    "section_index": 10,
+    "section_title": "# Technical Implementation Plan — Shipra.Backend.API",
+    "chunk_index": 47
+  },
+  {
+    "section_index": 10,
+    "section_title": "# Technical Implementation Plan — Shipra.Backend.API",
+    "chunk_index": 48
+  },
+  {
+    "section_index": 10,
+    "section_title": "# Technical Implementation Plan — Shipra.Backend.API",
+    "chunk_index": 49
+  },
+  {
+    "section_index": 10,
+    "section_title": "# Technical Implementation Plan — Shipra.Backend.API",
+    "chunk_index": 50
+  },
+  {
+    "section_index": 10,
+    "section_title": "# Technical Implementation Plan — Shipra.Backend.API",
+    "chunk_index": 51
+  },
+  {
+    "section_index": 10,
+    "section_title": "# Technical Implementation Plan — Shipra.Backend.API",
+    "chunk_index": 52
+  },
+  {
+    "section_index": 10,
+    "section_title": "# Technical Implementation Plan — Shipra.Backend.API",
+    "chunk_index": 53
+  },
+  {
+    "section_index": 10,
+    "section_title": "# Technical Implementation Plan — Shipra.Backend.API",
+    "chunk_index": 54
+  },
+  {
+    "section_index": 10,
+    "section_title": "# Technical Implementation Plan — Shipra.Backend.API",
+    "chunk_index": 55
+  },
+  {
+    "section_index": 10,
+    "section_title": "# Technical Implementation Plan — Shipra.Backend.API",
+    "chunk_index": 56
+  },
+  {
+    "section_index": 10,
+    "section_title": "# Technical Implementation Plan — Shipra.Backend.API",
+    "chunk_index": 57
+  },
+  {
+    "section_index": 10,
+    "section_title": "# Technical Implementation Plan — Shipra.Backend.API",
+    "chunk_index": 58
+  },
+  {
+    "section_index": 11,
+    "section_title": "# PART 6 — Atomic Tasks Checklist",
+    "chunk_index": 59
+  },
+  {
+    "section_index": 12,
+    "section_title": "# Tasks — Shipra.Backend.API",
+    "chunk_index": 60
+  },
+  {
+    "section_index": 12,
+    "section_title": "# Tasks — Shipra.Backend.API",
+    "chunk_index": 61
+  },
+  {
+    "section_index": 12,
+    "section_title": "# Tasks — Shipra.Backend.API",
+    "chunk_index": 62
+  },
+  {
+    "section_index": 12,
+    "section_title": "# Tasks — Shipra.Backend.API",
+    "chunk_index": 63
+  },
+  {
+    "section_index": 12,
+    "section_title": "# Tasks — Shipra.Backend.API",
+    "chunk_index": 64
+  },
+  {
+    "section_index": 12,
+    "section_title": "# Tasks — Shipra.Backend.API",
+    "chunk_index": 65
+  },
+  {
+    "section_index": 12,
+    "section_title": "# Tasks — Shipra.Backend.API",
+    "chunk_index": 66
+  },
+  {
+    "section_index": 12,
+    "section_title": "# Tasks — Shipra.Backend.API",
+    "chunk_index": 67
+  },
+  {
+    "section_index": 12,
+    "section_title": "# Tasks — Shipra.Backend.API",
+    "chunk_index": 68
+  },
+  {
+    "section_index": 12,
+    "section_title": "# Tasks — Shipra.Backend.API",
+    "chunk_index": 69
+  },
+  {
+    "section_index": 12,
+    "section_title": "# Tasks — Shipra.Backend.API",
+    "chunk_index": 70
+  },
+  {
+    "section_index": 12,
+    "section_title": "# Tasks — Shipra.Backend.API",
+    "chunk_index": 71
+  },
+  {
+    "section_index": 12,
+    "section_title": "# Tasks — Shipra.Backend.API",
+    "chunk_index": 72
+  }
+]
