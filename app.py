@@ -144,12 +144,30 @@ USER QUESTION:
 {question}
 """
 
-    response = client.models.generate_content(
-        model="gemini-3.6-flash",
-        contents=prompt
-    )
+    models_to_try = [
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-2.5-flash-lite",
+    "gemini-flash-lite-latest"
+]
 
-    return response.text, results
+last_error = None
+
+for model_name in models_to_try:
+    try:
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt
+        )
+
+        return response.text, results
+
+    except Exception as e:
+        last_error = e
+        continue
+
+raise last_error
 
 
 # -----------------------------
