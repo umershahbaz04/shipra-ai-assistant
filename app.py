@@ -92,7 +92,7 @@ def ask_shipra_ai(question):
     # Search relevant documentation
     results = search_documentation(
         question,
-        top_k=5
+        top_k=3
     )
 
     # Prepare context
