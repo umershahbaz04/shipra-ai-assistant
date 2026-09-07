@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import faiss
 import numpy as np
 import streamlit as st
@@ -88,11 +89,13 @@ def search_documentation(question, top_k=5):
 # -----------------------------
 def ask_shipra_ai(question):
 
+    # Search relevant documentation
     results = search_documentation(
         question,
         top_k=5
     )
 
+    # Prepare context
     context_parts = []
 
     for i, result in enumerate(results, start=1):
@@ -114,6 +117,9 @@ Content:
 
     context = "\n".join(context_parts)
 
+    # -----------------------------
+    # PROMPT
+    # -----------------------------
     prompt = f"""
 You are the AI assistant for the Shipra.Backend.API project.
 
@@ -164,9 +170,12 @@ USER QUESTION:
 {question}
 """
 
+    # -----------------------------
+    # GEMINI MODEL
+    # -----------------------------
     models_to_try = [
-    "gemini-2.5-flash-lite"
-]
+        "gemini-2.5-flash-lite"
+    ]
 
     last_error = None
 
@@ -174,35 +183,36 @@ USER QUESTION:
 
         try:
 
-            import time
+            # Start timer
+            start = time.time()
 
-import time
+            # Gemini API call
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt
+            )
 
-models_to_try = [
-    "gemini-2.5-flash-lite"
-]
+            # Calculate Gemini response time
+            gemini_time = time.time() - start
 
-last_error = None
+            print(
+                f"Gemini response time: {gemini_time:.2f} seconds"
+            )
 
-for model_name in models_to_try:
-    try:
-        start = time.time()
+            return response.text, results
 
-        response = client.models.generate_content(
-            model=model_name,
-            contents=prompt
-        )
+        except Exception as e:
 
-        gemini_time = time.time() - start
-        print(f"Gemini time: {gemini_time:.2f} seconds")
+            last_error = e
 
-        return response.text, results
+            print(
+                f"Gemini error with {model_name}: {e}"
+            )
 
-    except Exception as e:
-        last_error = e
-        continue
+            continue
 
-raise last_error
+    raise last_error
+
 
 # -----------------------------
 # CHAT INPUT
