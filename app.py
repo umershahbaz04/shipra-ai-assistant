@@ -174,7 +174,7 @@ USER QUESTION:
     # GEMINI MODEL
     # -----------------------------
     models_to_try = [
-        "gemini-2.5-flash-lite"
+        "gemini-3.5-flash-lite"
     ]
 
     last_error = None
