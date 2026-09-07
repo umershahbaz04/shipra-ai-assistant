@@ -174,10 +174,18 @@ USER QUESTION:
 
         try:
 
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt
-            )
+            import time
+
+start = time.time()
+
+response = client.models.generate_content(
+    model=model_name,
+    contents=prompt
+)
+
+print("Gemini time:", time.time() - start, "seconds")
+
+return response.text, results
 
             return response.text, results
 
