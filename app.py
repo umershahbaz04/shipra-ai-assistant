@@ -176,26 +176,33 @@ USER QUESTION:
 
             import time
 
-start = time.time()
+import time
 
-response = client.models.generate_content(
-    model=model_name,
-    contents=prompt
-)
+models_to_try = [
+    "gemini-2.5-flash-lite"
+]
 
-print("Gemini time:", time.time() - start, "seconds")
+last_error = None
 
-return response.text, results
+for model_name in models_to_try:
+    try:
+        start = time.time()
 
-            return response.text, results
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt
+        )
 
-        except Exception as e:
+        gemini_time = time.time() - start
+        print(f"Gemini time: {gemini_time:.2f} seconds")
 
-            last_error = e
-            continue
+        return response.text, results
 
-    raise last_error
+    except Exception as e:
+        last_error = e
+        continue
 
+raise last_error
 
 # -----------------------------
 # CHAT INPUT
