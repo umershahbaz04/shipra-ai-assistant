@@ -163,8 +163,8 @@ def search_documentation(question, top_k=12):
 
     keyword_matches.sort(
         key=lambda item: (
-            item[0],
-            item[1]
+            item[1],
+            item[0]
         ),
         reverse=True
     )
