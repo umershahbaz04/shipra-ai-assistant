@@ -126,18 +126,51 @@ def search_documentation(question, top_k=12):
         )
 
         if keyword_score > 0:
+
+            project = metadata[idx].get(
+                "project",
+                "backend"
+            )
+
+            file_path = metadata[idx].get(
+                "file_path",
+                ""
+            )
+
+            actual_code_bonus = 0
+
+            if project == "frontend":
+                actual_code_bonus += 10
+
+            if any(
+                word in file_path.lower()
+                for word in [
+                    "modal",
+                    "api",
+                    "service",
+                    "controller"
+                ]
+            ):
+                actual_code_bonus += 5
+
             keyword_matches.append(
-                (keyword_score, idx)
+                (
+                    keyword_score,
+                    actual_code_bonus,
+                    idx
+                )
             )
 
     keyword_matches.sort(
-        key=lambda item: item[0],
+        key=lambda item: (
+            item[0],
+            item[1]
+        ),
         reverse=True
     )
-
     selected_indices = []
 
-    for score, idx in keyword_matches:
+    for score, bonus, idx in keyword_matches:
         if idx not in selected_indices:
             selected_indices.append(idx)
 
@@ -235,6 +268,12 @@ The project contains:
 Use the retrieved frontend and backend project information as the PRIMARY SOURCE.
 
 When answering:
+- First inspect all retrieved sources for actual implementation code.
+- If actual implementation code is available, explain that code in its real execution order.
+- Do not replace existing project logic with a recommended architecture.
+- For flow questions, start from the UI event or function call and follow each API call and response.
+- Mention the exact function names, request-body fields, API endpoint, success action, and error handling.
+- Only provide a Recommended Solution when no relevant actual code exists in any retrieved source.
 - Identify whether the question concerns frontend, backend, or both.
 - Mention the actual project and file paths used.
 - For requested changes, provide numbered step-by-step instructions.
