@@ -17,8 +17,8 @@ st.set_page_config(
     layout="centered"
 )
 
-st.title("🤖 Shipra Backend AI Assistant")
-st.write("Ask questions about the Shipra.Backend.API project.")
+st.title("🤖 Shipra Full-Stack AI Assistant")
+st.write("Ask questions about the Shipra frontend and backend projects.")
 
 
 # -----------------------------
@@ -70,16 +70,17 @@ def search_documentation(question, top_k=5):
         top_k
     )
 
-    results = []
-
-    for distance, idx in zip(distances[0], indices[0]):
-
-        results.append({
-            "chunk_id": int(idx),
-            "distance": float(distance),
-            "section": metadata[idx]["section_title"],
-            "text": chunks[idx]
-        })
+    results.append({
+    "chunk_id": int(idx),
+    "distance": float(distance),
+    "project": metadata[idx].get("project", "backend"),
+    "file_path": metadata[idx].get(
+        "file_path",
+        "Shipra.Backend.API documentation"
+    ),
+    "section": metadata[idx]["section_title"],
+    "text": chunks[idx]
+})
 
     return results
 
@@ -101,8 +102,14 @@ def ask_shipra_ai(question):
     for i, result in enumerate(results, start=1):
 
         context_parts.append(
-            f"""
+    f"""
 SOURCE {i}
+
+Project:
+{result['project']}
+
+File:
+{result['file_path']}
 
 Section:
 {result['section']}
@@ -113,7 +120,7 @@ Chunk ID:
 Content:
 {result['text']}
 """
-        )
+)
 
     context = "\n".join(context_parts)
 
@@ -121,9 +128,21 @@ Content:
     # PROMPT
     # -----------------------------
     prompt = f"""
-You are the AI assistant for the Shipra.Backend.API project.
+You are the AI assistant for the complete Shipra project.
 
-Use the project documentation as the PRIMARY SOURCE for answering the user's question.
+The project contains:
+- Shipra.Backend.API backend
+- Shipra React frontend
+
+Use the retrieved frontend and backend project information as the PRIMARY SOURCE.
+
+When answering:
+- Identify whether the question concerns frontend, backend, or both.
+- Mention the actual project and file paths used.
+- For requested changes, provide numbered step-by-step instructions.
+- Explain how frontend components connect with backend APIs when relevant.
+- Clearly separate existing project code from recommended code.
+- Never invent files, components, endpoints, classes, or methods.
 
 IMPORTANT RULES:
 
@@ -249,6 +268,7 @@ if st.button("Ask AI"):
         for i, source in enumerate(sources, start=1):
 
             st.write(
-                f"{i}. {source['section']} "
-                f"(Chunk ID: {source['chunk_id']})"
-            )
+    f"{i}. [{source['project'].upper()}] "
+    f"{source['file_path']} "
+    f"(Chunk ID: {source['chunk_id']})"
+)
