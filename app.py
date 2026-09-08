@@ -70,17 +70,21 @@ def search_documentation(question, top_k=5):
         top_k
     )
 
-    results.append({
-    "chunk_id": int(idx),
-    "distance": float(distance),
-    "project": metadata[idx].get("project", "backend"),
-    "file_path": metadata[idx].get(
-        "file_path",
-        "Shipra.Backend.API documentation"
-    ),
-    "section": metadata[idx]["section_title"],
-    "text": chunks[idx]
-})
+    results = []
+
+    for distance, idx in zip(distances[0], indices[0]):
+
+        results.append({
+            "chunk_id": int(idx),
+            "distance": float(distance),
+            "project": metadata[idx].get("project", "backend"),
+            "file_path": metadata[idx].get(
+                "file_path",
+                "Shipra.Backend.API documentation"
+            ),
+            "section": metadata[idx]["section_title"],
+            "text": chunks[idx]
+        })
 
     return results
 
