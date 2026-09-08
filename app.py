@@ -159,6 +159,7 @@ def search_documentation(question, top_k=12):
     question_embedding = embedding_model.encode(
         [question],
         convert_to_numpy=True,
+        normalize_embeddings=True,
     ).astype("float32")
 
     semantic_count = min(max(top_k * 10, 100), index.ntotal)
@@ -204,7 +205,10 @@ def search_documentation(question, top_k=12):
 
         project = metadata[idx].get("project", "backend")
         file_path = metadata[idx].get("file_path", "")
-        is_actual_code = file_path != "Shipra.Backend.API documentation"
+        is_actual_code = (
+            metadata[idx].get("source_type") == "actual_code"
+            or file_path != "Shipra.Backend.API documentation"
+        )
 
         project_score = 0.0
         if asks_for_frontend and project == "frontend":
@@ -212,7 +216,7 @@ def search_documentation(question, top_k=12):
         if asks_for_backend and project == "backend":
             project_score += 10.0
         if asks_for_flow and is_actual_code:
-            project_score += 4.0
+            project_score += 12.0
 
         score = (lexical_score * 3.0) + path_score + semantic_score + project_score
 
@@ -278,11 +282,15 @@ def search_documentation(question, top_k=12):
                 "chunk_id": idx,
                 "distance": distance_map.get(idx),
                 "project": item.get("project", "backend"),
+                "source_type": item.get("source_type", "documentation"),
                 "file_path": item.get(
                     "file_path",
                     "Shipra.Backend.API documentation",
                 ),
                 "section": item.get("section_title", "Untitled section"),
+                "symbol": item.get("symbol"),
+                "start_line": item.get("start_line"),
+                "end_line": item.get("end_line"),
                 "text": chunks[idx],
             }
         )
@@ -298,8 +306,11 @@ def build_context(results):
             f"""
 SOURCE {number}
 Project: {result['project']}
+Source type: {result['source_type']}
 File: {result['file_path']}
 Section: {result['section']}
+Symbol: {result['symbol'] or 'not detected'}
+Lines: {result['start_line'] or '?'}-{result['end_line'] or '?'}
 Chunk ID: {result['chunk_id']}
 
 Content:
@@ -423,8 +434,14 @@ if st.button("Ask AI"):
 
         st.markdown("### Sources")
         for number, source in enumerate(sources, start=1):
+            details = []
+            if source.get("start_line") and source.get("end_line"):
+                details.append(
+                    f"lines {source['start_line']}-{source['end_line']}"
+                )
+            details.append(f"Chunk ID: {source['chunk_id']}")
             st.write(
                 f"{number}. [{source['project'].upper()}] "
                 f"{source['file_path']} "
-                f"(Chunk ID: {source['chunk_id']})"
+                f"({', '.join(details)})"
             )
