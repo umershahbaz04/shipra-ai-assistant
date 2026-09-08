@@ -206,35 +206,45 @@ USER QUESTION:
 
     for model_name in models_to_try:
 
-        try:
+        for attempt in range(1, 4):
 
-            # Start timer
-            start = time.time()
+            try:
+                start = time.time()
 
-            # Gemini API call
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt
-            )
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
 
-            # Calculate Gemini response time
-            gemini_time = time.time() - start
+                gemini_time = time.time() - start
 
-            print(
-                f"Gemini response time: {gemini_time:.2f} seconds"
-            )
+                print(
+                    f"Gemini response time: "
+                    f"{gemini_time:.2f} seconds"
+                )
 
-            return response.text, results
+                return response.text, results
 
-        except Exception as e:
+            except Exception as e:
+                last_error = e
+                error_text = str(e)
 
-            last_error = e
+                print(
+                    f"Gemini error with {model_name}, "
+                    f"attempt {attempt}: {e}"
+                )
 
-            print(
-                f"Gemini error with {model_name}: {e}"
-            )
+                is_temporary_error = (
+                    "503" in error_text
+                    or "UNAVAILABLE" in error_text
+                    or "high demand" in error_text
+                )
 
-            continue
+                if is_temporary_error and attempt < 3:
+                    time.sleep(5 * attempt)
+                    continue
+
+                break
 
     raise last_error
 
