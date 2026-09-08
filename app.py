@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import re
 import faiss
 import numpy as np
 import streamlit as st
@@ -58,26 +59,119 @@ chunks, metadata, index, embedding_model = load_data()
 # -----------------------------
 # SEARCH DOCUMENTATION
 # -----------------------------
-def search_documentation(question, top_k=5):
+def search_documentation(question, top_k=12):
 
     question_embedding = embedding_model.encode(
         [question],
         convert_to_numpy=True
     ).astype("float32")
 
+    semantic_count = min(
+        max(top_k * 4, 40),
+        index.ntotal
+    )
+
     distances, indices = index.search(
         question_embedding,
-        top_k
+        semantic_count
     )
+
+    def get_words(text):
+        text = re.sub(
+            r"([a-z])([A-Z])",
+            r"\1 \2",
+            text
+        ).lower()
+
+        words = re.findall(r"[a-z0-9]+", text)
+
+        normalized = []
+
+        ignored_words = {
+            "yar", "hai", "hy", "kya", "kia",
+            "ko", "ki", "ke", "k", "mai",
+            "main", "sy", "se", "or", "aur",
+            "kon", "rha", "raha", "hyn",
+            "hain", "time", "wala", "wali"
+        }
+
+        for word in words:
+            if word in ignored_words or len(word) < 3:
+                continue
+
+            if word.startswith("activat"):
+                word = "activat"
+            elif word in {"sale", "sales"}:
+                word = "sale"
+
+            normalized.append(word)
+
+        return set(normalized)
+
+    question_words = get_words(question)
+    keyword_matches = []
+
+    for idx, chunk in enumerate(chunks):
+
+        searchable_text = " ".join([
+            metadata[idx].get("project", ""),
+            metadata[idx].get("file_path", ""),
+            metadata[idx].get("section_title", ""),
+            chunk
+        ])
+
+        searchable_words = get_words(searchable_text)
+        keyword_score = len(
+            question_words.intersection(searchable_words)
+        )
+
+        if keyword_score > 0:
+            keyword_matches.append(
+                (keyword_score, idx)
+            )
+
+    keyword_matches.sort(
+        key=lambda item: item[0],
+        reverse=True
+    )
+
+    selected_indices = []
+
+    for score, idx in keyword_matches:
+        if idx not in selected_indices:
+            selected_indices.append(idx)
+
+        if len(selected_indices) >= top_k:
+            break
+
+    for idx in indices[0]:
+        idx = int(idx)
+
+        if idx not in selected_indices:
+            selected_indices.append(idx)
+
+        if len(selected_indices) >= top_k:
+            break
+
+    distance_map = {
+        int(idx): float(distance)
+        for distance, idx in zip(
+            distances[0],
+            indices[0]
+        )
+    }
 
     results = []
 
-    for distance, idx in zip(distances[0], indices[0]):
+    for idx in selected_indices:
 
         results.append({
-            "chunk_id": int(idx),
-            "distance": float(distance),
-            "project": metadata[idx].get("project", "backend"),
+            "chunk_id": idx,
+            "distance": distance_map.get(idx),
+            "project": metadata[idx].get(
+                "project",
+                "backend"
+            ),
             "file_path": metadata[idx].get(
                 "file_path",
                 "Shipra.Backend.API documentation"
@@ -97,7 +191,7 @@ def ask_shipra_ai(question):
     # Search relevant documentation
     results = search_documentation(
         question,
-        top_k=3
+        top_k=12
     )
 
     # Prepare context
