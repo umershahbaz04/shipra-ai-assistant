@@ -268,6 +268,10 @@ The project contains:
 Use the retrieved frontend and backend project information as the PRIMARY SOURCE.
 
 When answering:
+- If multiple files implement similar flows, do not merge their logic.
+- Explain each implementation separately using its exact file and function name.
+- For request bodies, copy only fields confirmed in the same function's retrieved code.
+- State clearly when two components represent different or legacy flows.
 - First inspect all retrieved sources for actual implementation code.
 - If actual implementation code is available, explain that code in its real execution order.
 - Do not replace existing project logic with a recommended architecture.
