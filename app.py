@@ -580,7 +580,7 @@ def snippet_anchor_candidates(result):
     return [candidate for candidate in candidates if candidate]
 
 
-def extract_exact_snippet(result, question, maximum_lines=24):
+def extract_exact_snippet(result, question, maximum_lines=14):
     """Select a useful contiguous excerpt without asking the model to copy it."""
     lines = result["text"].splitlines()
     if not lines:
@@ -678,8 +678,9 @@ def inject_verified_code(answer, code_cards, minimum_cards=4):
         card = code_cards.get(source_number)
         if not card:
             return ""
-        if source_number not in used_sources:
-            used_sources.append(source_number)
+        if source_number in used_sources:
+            return ""
+        used_sources.append(source_number)
         return card
 
     answer = re.sub(
@@ -712,22 +713,9 @@ def ask_shipra_ai(question):
     results = search_documentation(question, top_k=15)
     context = build_context(results)
     code_cards = build_code_cards(results, question)
-    question_tokens = tokenize(question)
-    flow_requested = bool(
-        question_tokens.intersection(
-            {"connect", "create", "update", "delete", "validate", "flow"}
-        )
-    )
-    sale_channel_create_flow = {
-        "sale",
-        "channel",
-        "connect",
-        "create",
-    }.issubset(question_tokens)
-    desired_cards = 6 if sale_channel_create_flow else 4
-    minimum_code_cards = (
-        min(desired_cards, len(code_cards)) if flow_requested else 0
-    )
+    # Never append unexplained fallback snippets. The model places a small
+    # number of verified code markers inside already-explained steps.
+    minimum_code_cards = 0
 
     prompt = f"""
 You are the engineering assistant for the complete Shipra project:
@@ -774,8 +762,9 @@ NON-NEGOTIABLE EVIDENCE RULES
     inserted later by the application. To place code after a step, output only
     the supplied marker for that source, for example [[CODE_SOURCE_2]]. Put the
     marker on its own line and never alter its spelling or number.
-14. Use 4-6 code markers for a cross-layer flow when matching actual-code
-    sources exist. Place each marker immediately after the step it supports.
+14. Use 3-5 code markers for a cross-layer flow when matching actual-code
+    sources exist. Choose only the most decisive code; do not show repetitive
+    or neighboring boilerplate. Place each marker immediately after the step it supports.
     Do not write File, Function, Class, or Symbol labels; the application adds
     verified labels with the exact snippet.
 15. Do not use "...", invented sample values, or an "Example Code" block when
@@ -814,6 +803,10 @@ NON-NEGOTIABLE EVIDENCE RULES
     `if` branch. The visible activation call occurs in the `else` branch after
     creating a new Shopify config. State this distinction exactly and do not
     summarize both branches as automatically activating the channel.
+24. Every code marker must be followed by a useful explanation in the user's
+    language. Explain: (a) what the shown lines do, (b) why that step exists or
+    which condition controls it, and (c) what executes next. Use 2-4 concise
+    sentences; never leave a code block unexplained.
 
 ANSWER STYLE
 - Reply in the user's language and level of formality.
@@ -827,9 +820,12 @@ ANSWER STYLE
   1. Step name and behavior.
   2. Supporting source number inline.
   3. The matching [[CODE_SOURCE_N]] marker on its own line.
-  4. One or two plain-language sentences explaining what that source proves.
-- Prefer 4-6 decisive excerpts that show the cross-layer execution chain. Omit
+  4. Two to four plain-language sentences explaining what the exact code does,
+     its important condition/data, and the next execution step.
+- Prefer 3-5 focused excerpts that show the cross-layer execution chain. Omit
   repetitive imports, styling, localization, and unrelated boilerplate.
+- Explanation should be more prominent than code. Do not repeat the same
+  source marker or show the same code twice.
 - Never type a code fence or manually type a file/function label.
 - Use numbered steps for flows and implementation guidance.
 - Mention supporting source numbers inline, for example [Source 2].
