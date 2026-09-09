@@ -1162,7 +1162,7 @@ if st.button("Ask AI"):
 
         st.markdown("### AI Answer")
 
-        scenario_column, code_column = st.columns(2)
+        scenario_column, code_column = st.columns(1,2)
 
         with scenario_column:
             st.markdown("#### Practical Scenario Guide")
