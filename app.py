@@ -1025,7 +1025,29 @@ RETRIEVED SHIPRA SOURCES
 USER QUESTION
 {question}
 """
+    
+    scenario_prompt = f"""
+Create only a practical user scenario guide for the Shipra project.
 
+Required output language: {response_language}
+
+Explain the user's goal in simple steps:
+1. What the user needs before starting.
+2. Which Shipra screen or action they should use.
+3. What details they need to fill or select.
+4. What success result they should expect.
+5. Any validation or error condition visible in the supplied sources.
+
+Use only the supplied project sources. Do not invent screen actions.
+Do not show code, source numbers, file paths, Markdown code fences, or headings.
+Return only the scenario-guide text.
+
+RETRIEVED SHIPRA SOURCES
+{context}
+
+USER QUESTION
+{question}
+"""
     models_to_try = [
         "gemini-3.5-flash-lite",
         "gemini-3.6-flash",
@@ -1044,6 +1066,45 @@ USER QUESTION
                 )
                 elapsed = time.time() - start
                 print(f"Gemini response time: {elapsed:.2f} seconds")
+                                has_required_sections = (
+                    "### Practical Scenario Guide" in answer_text
+                    and "### Actual Project Code Flow" in answer_text
+                )
+
+                if not has_required_sections:
+                    scenario_response = client.models.generate_content(
+                        model=model_name,
+                        contents=scenario_prompt,
+                    )
+                    scenario_text = scenario_response.text.strip()
+
+                    if needs_language_retry(
+                        scenario_text,
+                        response_language,
+                    ):
+                        scenario_correction_prompt = (
+                            scenario_prompt
+                            + f"""
+
+LANGUAGE CORRECTION REQUIRED
+Rewrite the scenario guide in {response_language} only.
+Do not add headings, code, sources, or file paths.
+"""
+                        )
+                        scenario_response = (
+                            client.models.generate_content(
+                                model=model_name,
+                                contents=scenario_correction_prompt,
+                            )
+                        )
+                        scenario_text = scenario_response.text.strip()
+
+                    answer_text = (
+                        "### Practical Scenario Guide\n"
+                        f"{scenario_text}\n\n"
+                        "### Actual Project Code Flow\n"
+                        f"{answer_text}"
+                    )
                 verified_answer = inject_verified_code(
                     response.text,
                     code_cards,
