@@ -1373,9 +1373,43 @@ if st.button("Ask AI"):
                 unsafe_allow_html=True
             )
 
-        with scenario_column:
+                scenario_column, separator_column, code_column = st.columns(
+            [1, 0.03, 2]
+        )
+
         with scenario_column:
             st.markdown(f"#### {display_labels['scenario']}")
+
+            if scenario_answer:
+                st.markdown(scenario_answer)
+            else:
+                st.info(display_labels["no_scenario"])
+
+        with separator_column:
+            st.markdown(
+                """
+                <div style="
+                    width: 1px;
+                    min-height: 560px;
+                    margin: 0 auto;
+                    background: linear-gradient(
+                        to bottom,
+                        rgba(148, 163, 184, 0.10),
+                        rgba(148, 163, 184, 0.55),
+                        rgba(148, 163, 184, 0.10)
+                    );
+                "></div>
+                """,
+                unsafe_allow_html=True
+            )
+
+        with code_column:
+            st.markdown(f"#### {display_labels['code']}")
+
+            if code_answer:
+                st.markdown(code_answer)
+            else:
+                st.info(display_labels["no_code"]) {display_labels['scenario']}")
 
             if scenario_answer:
                 st.markdown(scenario_answer)
