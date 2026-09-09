@@ -747,7 +747,7 @@ def snippet_anchor_candidates(result):
     return [candidate for candidate in candidates if candidate]
 
 
-def extract_exact_snippet(result, question, maximum_lines=14):
+def extract_exact_snippet(result, question, maximum_lines=20):
     """Select a useful contiguous excerpt without asking the model to copy it."""
     lines = result["text"].splitlines()
     if not lines:
@@ -971,37 +971,38 @@ NON-NEGOTIABLE EVIDENCE RULES
     creating a new Shopify config. State this distinction exactly and do not
     summarize both branches as automatically activating the channel.
 24. Immediately after every code marker, write the heading
-    "**Is code mein kya ho raha hai:**" and then 2-4 plain-language sentences.
-    Explain only the lines shown in that exact code excerpt. Do not say that a
-    snippet builds a payload, calls an API, queries the database, validates a
-    value, or updates state unless those operations are literally visible in
-    that same snippet.
-25. A wrapper function must be explained only as a wrapper. For example, if
-    `handleFilter` only calls `getAllClientRate()`, say exactly that it starts
-    the next function; explain payload creation and the API call only below the
-    separate `getAllClientRate()` snippet.
-26. Keep result-processing separate from data retrieval. If a repository
-    snippet groups, filters, or maps already returned rows, describe it as
-    result processing; do not call it the database query unless the query code
-    is visible in that excerpt.
-27. For frontend questions, treat `active_reachable` files as the current
+    "**Is code mein kya ho raha hai:**" and then write exactly 2-4 plain-language
+    sentences. Every sentence must describe only an identifier, condition, value,
+    function call, or state update literally visible in the code block directly
+    above it.
+25. Never explain the internal work of a called function under a wrapper
+    function's code block. For example, if `handleFilter` only calls
+    `getAllClientRate()`, explain only that it starts `getAllClientRate()`.
+    Explain address dictionaries, payload creation, loading state, API calls,
+    and response handling only below the separate snippet where those lines are
+    visibly shown.
+26. Do not describe code that is outside the displayed excerpt. If the API
+    helper, response handling, repository call, database query, or error
+    handling is not visible in the current code block, create a separate step
+    with its own matching code marker instead of mentioning it here.
+27. A repository snippet that groups, filters, maps, or formats rows must be
+    described as result processing. Call it a database query only when the
+    visible snippet itself shows the query or database call.
+28. For frontend questions, treat `active_reachable` files as the current
     implementation. Do not mix behavior from `unreferenced_or_dynamic` or
-    `backup_named` files into an active flow. Mention an inactive candidate only
-    when the user explicitly asks about that exact file, or when explaining a
-    clearly labelled ambiguity.
-28. An import proves only that a function is available; it does not prove that
-    a click handler calls it. Trace the visible `onClick` to its exact handler,
-    then trace the call written inside that handler, the API helper, endpoint,
-    controller/query/command, and repository only when each link is retrieved.
-29. For an implementation request, first check whether the requested button,
-    function, or behavior already exists in the active file. If it exists,
-    explain its current location and behavior before suggesting changes. If the
-    user wants it on another screen but has not identified that screen, ask one
-    short clarification instead of giving generic React steps.
-30. Never claim that a displayed snippet contains a function, validation, API
+    `backup_named` files into an active flow.
+29. For Price Calculator filter questions, when the matching sources exist,
+    show the flow in this exact order: active `handleFilter`; active
+    `getAllClientRate`; Axios `GetAllClientRate`; `CarrierController`;
+    `GetAllClientRateQueryHandler`; and `CarrierRepository`.
+30. Do not call a step an Axios/API-helper step unless the directly displayed
+    code block contains the literal `Axios.post` call. Do not call a step a
+    repository/database step unless the directly displayed code block contains
+    the relevant repository or database call.
+31. Never claim that a displayed snippet contains a function, validation, API
     call, or condition that is not literally visible in that source. Cite the
     separate source that proves the claim, or state that it was not retrieved.
-31. Price Calculator has multiple similarly named frontend files. Use
+32. Price Calculator has multiple similarly named frontend files. Use
     reachability evidence to identify the active one. Never combine filter
     fields or handlers from an unreferenced Price Calculator implementation
     with the active implementation.
@@ -1014,15 +1015,17 @@ ANSWER STYLE
 - For "what happens" questions, trace: UI event → validation → request body →
   API helper/endpoint → backend controller/handler → persistence or external
   integration → success handling → error handling.
-- For every major confirmed step, use this compact pattern:
-  1. Step name and behavior.
-  2. Supporting source number inline.
-  3. The matching [[CODE_SOURCE_N]] marker on its own line.
-  4. Immediately after the marker, add the heading
-   "**Is code mein kya ho raha hai:**" followed by 2-4 plain-language
-   sentences. Every sentence must be supported by the exact displayed lines.
-   Explain the visible operation first, then its purpose, then only the next
-   function that is literally called by those lines.
+- For every major confirmed step, use this exact pattern:
+  1. Step name and one short confirmed sentence with its source number.
+  2. The matching [[CODE_SOURCE_N]] marker on its own line.
+  3. The heading "**Is code mein kya ho raha hai:**".
+  4. Write 2-4 detailed but simple sentences about only the code block directly
+     above. Start with the visible operation, then explain its purpose, and
+     mention the next function only when its call is literally visible.
+  5. Never use details from a later code block to explain an earlier one.
+- Use 4-6 focused excerpts for a complete frontend-to-backend flow when those
+  sources are available. Include the actual Axios helper separately from the
+  frontend page function.
 - Prefer 3-5 focused excerpts that show the cross-layer execution chain. Omit
   repetitive imports, styling, localization, and unrelated boilerplate.
 - Explanation should be more prominent than code. Do not repeat the same
