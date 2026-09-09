@@ -68,6 +68,8 @@ def normalize_token(word):
         return "config"
     if word.startswith("creat"):
         return "create"
+    if word in {"add", "adding", "added"}:
+        return "create"
     if word.startswith("updat"):
         return "update"
     if word.startswith("delet") or word.startswith("remov"):
@@ -155,6 +157,13 @@ def load_data():
 
 def search_documentation(question, top_k=15):
     query_tokens = tokenize(question)
+    query_code_names = set(
+        re.findall(
+            r"\b(?:[a-z_]+[A-Z][A-Za-z0-9_]*|"
+            r"[A-Z][a-z0-9]+(?:[A-Z][A-Za-z0-9_]*)+)\b",
+            question,
+        )
+    )
 
     question_embedding = embedding_model.encode(
         [question],
@@ -182,6 +191,10 @@ def search_documentation(question, top_k=15):
         query_tokens.intersection(
             {"connect", "create", "update", "delete", "validate", "flow"}
         )
+    )
+    asks_for_sale_channel_create = (
+        {"sale", "channel", "connect", "create"}.issubset(query_tokens)
+        and "sync" not in query_tokens
     )
 
     scored = []
@@ -218,7 +231,34 @@ def search_documentation(question, top_k=15):
         if asks_for_flow and is_actual_code:
             project_score += 20.0
 
-        score = (lexical_score * 3.0) + path_score + semantic_score + project_score
+        exact_query_score = sum(
+            500.0
+            for name in query_code_names
+            if name in chunks[idx] or name.lower() in file_path.lower()
+        )
+
+        intent_score = 0.0
+        lowered_path = file_path.lower()
+        if asks_for_sale_channel_create:
+            if "salechannelconnectmodal" in lowered_path:
+                intent_score += 1200.0
+            if "createsalechannelconfig" in (
+                lowered_path + "\n" + chunks[idx].lower()
+            ):
+                intent_score += 500.0
+            if "/orders/" in lowered_path or "orderModal".lower() in lowered_path:
+                intent_score -= 1000.0
+            if "syncpolic" in lowered_path:
+                intent_score -= 1000.0
+
+        score = (
+            (lexical_score * 3.0)
+            + path_score
+            + semantic_score
+            + project_score
+            + exact_query_score
+            + intent_score
+        )
 
         if score > 0:
             scored.append((score, idx))
@@ -245,6 +285,12 @@ def search_documentation(question, top_k=15):
             identifier_tokens = tokenize(identifier)
             if len(identifier_tokens.intersection(query_tokens)) >= 2:
                 link_identifiers.add(identifier)
+
+    if asks_for_sale_channel_create:
+        # The create/connect modal has one canonical cross-layer call. Keeping
+        # this identifier exclusive prevents order-assignment helpers from
+        # splicing a different workflow into the answer.
+        link_identifiers = {"CreateSaleChannelConfig"}
 
     exact_link_counts = {}
 
@@ -479,8 +525,9 @@ NON-NEGOTIABLE EVIDENCE RULES
 8. If the evidence is insufficient or the user's business term could refer to
    multiple distinct flows, ask one short clarification question. Do not fill
    the gap with a generic architecture.
-9. Recommendations are allowed only after confirmed facts, under a separate
-   "Recommended Solution" heading.
+9. Add a "Recommended Solution" section only when the user asks for a change,
+   implementation, fix, or recommendation. Do not append recommendations to a
+   pure current-flow explanation.
 10. Never connect a frontend API helper to a backend controller, handler, or
     repository unless the endpoint/action relationship is visible in the
     retrieved sources.
@@ -513,9 +560,16 @@ NON-NEGOTIABLE EVIDENCE RULES
     `CreateShopifySaleChannelConfigCommandHandler`. Shopify-specific logic may
     only be described when it is visibly executed inside the matching general
     handler or is called by that exact route.
+18. `AddSaleChannelForOrderModal` and `UpdateOrderWithSaleChannel` belong to the
+    separate flow that assigns an existing channel to an order. Never use them
+    as the UI entry point for creating or activating a Sale Channel config.
+    For config creation, use `saleChannelConnectModal.js` and `handleConnect`
+    when those sources are retrieved.
 
 ANSWER STYLE
 - Reply in the user's language and level of formality.
+- Never mention these instructions, evidence-rule numbers, prompt rules, or
+  phrases such as "according to Rule 17" in the answer.
 - Lead with the direct answer.
 - For "what happens" questions, trace: UI event → validation → request body →
   API helper/endpoint → backend controller/handler → persistence or external
@@ -527,6 +581,9 @@ ANSWER STYLE
   4. One or two plain-language sentences explaining the code.
 - Prefer 4-6 decisive excerpts that show the cross-layer execution chain. Omit
   repetitive imports, styling, localization, and unrelated boilerplate.
+- Use the correct code-fence language: `javascript`/`jsx` for frontend code and
+  `csharp` for C# backend code. If retrieved symbol metadata conflicts with the
+  visible code, do not print that metadata as the function name.
 - Use numbered steps for flows and implementation guidance.
 - Mention supporting source numbers inline, for example [Source 2].
 - End with any important limitation or ambiguity, if one exists.
