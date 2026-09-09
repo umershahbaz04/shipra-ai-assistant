@@ -565,6 +565,20 @@ NON-NEGOTIABLE EVIDENCE RULES
     as the UI entry point for creating or activating a Sale Channel config.
     For config creation, use `saleChannelConnectModal.js` and `handleConnect`
     when those sources are retrieved.
+19. Before returning, verify every displayed code line character-for-character
+    against one retrieved source. Preserve operators, punctuation, casing, and
+    method names exactly. Never wrap one source line into two code lines. If an
+    excerpt cannot be copied exactly, omit that excerpt and explain the step in
+    prose with its source number.
+20. Explain conditional branches independently. A method call inside an `else`
+    block proves behavior only for that branch. Do not claim the `if` branch
+    performs the same activation unless its visible lines also call the
+    activation method.
+21. The matching backend class/function label for this route is
+    `CreateSaleChannelConfigCommandHandler.HandleRequest`. Never label it from
+    incidental metadata such as `StatusCode`. Preserve the exact method name
+    `UpdateSaleChannelConfigWhileActivate`; do not alter it with spaces or
+    underscores.
 
 ANSWER STYLE
 - Reply in the user's language and level of formality.
