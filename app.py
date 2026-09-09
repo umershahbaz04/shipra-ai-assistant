@@ -1200,9 +1200,6 @@ RETRIEVED SHIPRA SOURCES
 USER QUESTION
 {question}
 """
-    
-    scenario_prompt = f"""
-Create only a practical user scenario guide for the Shipra project.
 
     scenario_prompt = f"""
 Create only a practical user scenario guide for the Shipra project.
@@ -1226,6 +1223,7 @@ RETRIEVED SHIPRA SOURCES
 USER QUESTION
 {question}
 """
+
     models_to_try = [
         "gemini-3.5-flash-lite",
         "gemini-3.6-flash",
@@ -1236,14 +1234,12 @@ USER QUESTION
 
     for model_name in models_to_try:
         for attempt in range(1, 4):
-                        try:
+            try:
                 start = time.time()
-
                 response = client.models.generate_content(
                     model=model_name,
                     contents=prompt,
                 )
-
                 elapsed = time.time() - start
                 print(f"Gemini response time: {elapsed:.2f} seconds")
                 answer_text = response.text
@@ -1309,7 +1305,6 @@ Do not add headings, code, sources, or file paths.
                     code_cards,
                     minimum_cards=minimum_code_cards,
                 )
-
                 return verified_answer, results
 
             except Exception as error:
