@@ -223,7 +223,51 @@ def search_documentation(question, top_k=15):
         if score > 0:
             scored.append((score, idx))
 
+    # Discover domain call names from the strongest matching frontend code.
+    # Example: CreateSaleChannelConfig is then matched exactly across the
+    # Axios helper, controller, command handler, repository, and entity.
     scored.sort(key=lambda item: item[0], reverse=True)
+    link_identifiers = set()
+
+    frontend_seeds = [
+        idx
+        for _, idx in scored
+        if metadata[idx].get("project") == "frontend"
+        and metadata[idx].get("source_type") == "actual_code"
+    ][:8]
+
+    for seed_idx in frontend_seeds:
+        identifiers = re.findall(
+            r"\b[A-Z][A-Za-z0-9]{5,}\b",
+            chunks[seed_idx],
+        )
+        for identifier in identifiers:
+            identifier_tokens = tokenize(identifier)
+            if len(identifier_tokens.intersection(query_tokens)) >= 2:
+                link_identifiers.add(identifier)
+
+    if link_identifiers:
+        linked_scores = []
+        for score, idx in scored:
+            item = metadata[idx]
+            searchable = "\n".join(
+                [
+                    item.get("file_path", ""),
+                    item.get("symbol") or "",
+                    chunks[idx],
+                ]
+            )
+            exact_links = sum(
+                identifier in searchable
+                for identifier in link_identifiers
+            )
+            linked_scores.append((score + (exact_links * 40.0), idx))
+
+        scored = sorted(
+            linked_scores,
+            key=lambda item: item[0],
+            reverse=True,
+        )
 
     # For flow questions, select evidence across distinct project layers. This
     # prevents a similarly named update/sync feature from crowding out the real
@@ -369,6 +413,10 @@ NON-NEGOTIABLE EVIDENCE RULES
 11. Do not treat Sync Policy activation as Sale Channel configuration
     activation. If the wording could mean multiple flows, explain each flow
     separately and identify its screen/action.
+12. Follow exact call names across layers. A Create... frontend call must be
+    traced through the matching Create... endpoint/command/handler. Never
+    substitute an Update..., Sync..., or platform-specific handler unless the
+    retrieved code explicitly calls it in that same execution path.
 
 ANSWER STYLE
 - Reply in the user's language and level of formality.
