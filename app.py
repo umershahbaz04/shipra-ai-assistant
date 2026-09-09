@@ -1201,9 +1201,6 @@ USER QUESTION
 {question}
 """
 
-    scenario_prompt = f"""
-Create only a practical user scenario guide for the Shipra project.
-
 Required output language: {response_language}
 
 Explain the user's goal in simple steps:
@@ -1223,7 +1220,6 @@ RETRIEVED SHIPRA SOURCES
 USER QUESTION
 {question}
 """
-
     models_to_try = [
         "gemini-3.5-flash-lite",
         "gemini-3.6-flash",
