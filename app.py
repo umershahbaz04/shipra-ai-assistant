@@ -1204,9 +1204,6 @@ USER QUESTION
     scenario_prompt = f"""
 Create only a practical user scenario guide for the Shipra project.
 
-    scenario_prompt = f"""
-Create only a practical user scenario guide for the Shipra project.
-
 Required output language: {response_language}
 
 Explain the user's goal in simple steps:
@@ -1223,6 +1220,9 @@ Return only the scenario-guide text.
 RETRIEVED SHIPRA SOURCES
 {context}
 
+USER QUESTION
+{question}
+"""
 USER QUESTION
 {question}
 """
