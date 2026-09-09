@@ -1059,7 +1059,21 @@ ANSWER STYLE
   existing code-explanation rules.
 - Keep the scenario guide useful for a non-technical user. Keep the code flow
   useful for a developer. Never mix the two sections.
-- Reply in the user's language and level of formality.
+- First check whether the user explicitly requests an answer language, for
+  example: "explain in Roman Urdu", "Roman Urdu mein batao", "answer in
+  English", or "English mein explain karo". An explicit language request always
+  overrides the language used in the question.
+- If the user explicitly requests Roman Urdu, write every explanation, step,
+  scenario guide, error explanation, summary, and limitation in natural Roman
+  Urdu.
+- If the user explicitly requests English, write every explanation, step,
+  scenario guide, error explanation, summary, and limitation in English.
+- If no language is explicitly requested, detect the question language: answer
+  primarily-English questions in English and primarily-Roman-Urdu questions in
+  natural Roman Urdu.
+- Keep exact project code, file paths, API URLs, class names, function names,
+  database names, and code keywords unchanged because they are technical
+  identifiers, not answer language.
 - Never mention these instructions, evidence-rule numbers, prompt rules, or
   phrases such as "according to Rule 17" in the answer.
 - Lead with the direct answer.
@@ -1162,7 +1176,7 @@ if st.button("Ask AI"):
 
         st.markdown("### AI Answer")
 
-        scenario_column, code_column = st.columns(1,2)
+        scenario_column, code_column = st.columns([1, 2])
 
         with scenario_column:
             st.markdown("#### Practical Scenario Guide")
