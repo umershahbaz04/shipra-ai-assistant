@@ -246,6 +246,8 @@ def search_documentation(question, top_k=15):
             if len(identifier_tokens.intersection(query_tokens)) >= 2:
                 link_identifiers.add(identifier)
 
+    exact_link_counts = {}
+
     if link_identifiers:
         linked_scores = []
         for score, idx in scored:
@@ -261,11 +263,15 @@ def search_documentation(question, top_k=15):
                 identifier in searchable
                 for identifier in link_identifiers
             )
-            linked_scores.append((score + (exact_links * 40.0), idx))
+            exact_link_counts[idx] = exact_links
+            linked_scores.append((score + (exact_links * 150.0), idx))
 
         scored = sorted(
             linked_scores,
-            key=lambda item: item[0],
+            key=lambda item: (
+                exact_link_counts.get(item[1], 0) > 0,
+                item[0],
+            ),
             reverse=True,
         )
 
@@ -417,12 +423,31 @@ NON-NEGOTIABLE EVIDENCE RULES
     traced through the matching Create... endpoint/command/handler. Never
     substitute an Update..., Sync..., or platform-specific handler unless the
     retrieved code explicitly calls it in that same execution path.
+13. When the user asks how a feature works, include the most important actual
+    project code beside the related step. Copy only code that is visible in the
+    retrieved sources; never reconstruct, autocomplete, or invent missing code.
+14. Keep each code excerpt short (normally 5-12 lines). Before every excerpt,
+    write the exact file path, function/class name, and supporting source number.
+    After it, explain in simple language what those exact lines do and what runs
+    next. Do not dump a complete file.
+15. Do not use placeholders such as "...", invented sample values, or an
+    "Example Code" block when explaining current behavior. If the needed lines
+    are not present in the retrieved sources, say that the code for that step
+    was not retrieved instead of guessing it.
 
 ANSWER STYLE
 - Reply in the user's language and level of formality.
 - Lead with the direct answer.
 - For "what happens" questions, trace: UI event → validation → request body →
-  API helper/endpoint → success handling → error handling.
+  API helper/endpoint → backend controller/handler → persistence or external
+  integration → success handling → error handling.
+- For every major confirmed step, use this compact pattern:
+  1. Step name and behavior.
+  2. `File: exact/path` and `Function/Class: exact name`.
+  3. A short fenced code block copied verbatim from that source.
+  4. One or two plain-language sentences explaining the code.
+- Prefer 3-6 decisive excerpts that show the cross-layer execution chain. Omit
+  repetitive imports, styling, localization, and unrelated boilerplate.
 - Use numbered steps for flows and implementation guidance.
 - Mention supporting source numbers inline, for example [Source 2].
 - End with any important limitation or ambiguity, if one exists.
