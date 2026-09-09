@@ -904,8 +904,56 @@ def split_answer_sections(answer):
 
     return scenario_text.strip(), code_text.strip()
 
+def get_response_language(question):
+    normalized_question = question.lower()
+
+    english_requests = [
+        "answer in english",
+        "explain in english",
+        "english mein",
+        "english main",
+        "english me",
+    ]
+
+    roman_urdu_requests = [
+        "answer in roman urdu",
+        "explain in roman urdu",
+        "roman urdu mein",
+        "roman urdu main",
+        "roman urdu me",
+    ]
+
+    if any(
+        request in normalized_question
+        for request in english_requests
+    ):
+        return "English"
+
+    if any(
+        request in normalized_question
+        for request in roman_urdu_requests
+    ):
+        return "Roman Urdu"
+
+    roman_urdu_words = {
+        "mujhe", "mjy", "kya", "kia", "kaise", "kesy",
+        "ka", "ki", "ke", "mein", "mai", "main", "aur",
+        "or", "batao", "btao", "hai", "hain", "hy",
+        "karna", "karo", "chahiye", "yar",
+    }
+
+    question_words = set(
+        re.findall(r"[a-z]+", normalized_question)
+    )
+
+    if question_words.intersection(roman_urdu_words):
+        return "Roman Urdu"
+
+    return "English"
+
 
 def ask_shipra_ai(question):
+    response_language = get_response_language(question)
     results = search_documentation(question, top_k=15)
     context = build_context(results, question)
     code_cards = build_code_cards(results, question)
@@ -921,6 +969,10 @@ You are the engineering assistant for the complete Shipra project:
 The user may write in English, Urdu, Roman Urdu, shorthand, or with spelling
 mistakes. Understand the intent yourself. Never require the user to know file
 names, function names, architecture terms, or a special prompt format.
+REQUIRED OUTPUT LANGUAGE FOR THIS ANSWER: {response_language}
+This language is selected by the application from the user's question and any
+explicit language request. Write all user-facing prose only in this language.
+Do not override it based on project file names, code, or previous answers.
 
 NON-NEGOTIABLE EVIDENCE RULES
 1. Treat the supplied sources as the only evidence about existing Shipra code.
