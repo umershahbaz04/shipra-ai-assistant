@@ -1058,15 +1058,38 @@ USER QUESTION
 
     for model_name in models_to_try:
         for attempt in range(1, 4):
-            try:
+                        try:
                 start = time.time()
+
                 response = client.models.generate_content(
                     model=model_name,
                     contents=prompt,
                 )
+
                 elapsed = time.time() - start
                 print(f"Gemini response time: {elapsed:.2f} seconds")
-                                has_required_sections = (
+
+                answer_text = response.text
+
+                if needs_language_retry(
+                    answer_text,
+                    response_language,
+                ):
+                    correction_prompt = prompt + f"""
+
+LANGUAGE CORRECTION REQUIRED
+Your previous draft used the wrong answer language. Rewrite the complete
+answer now. Keep the two required Markdown headings exactly unchanged, but
+write every user-facing sentence below them in {response_language} only.
+Do not change, add, or remove any project facts or code placeholders.
+"""
+                    corrected_response = client.models.generate_content(
+                        model=model_name,
+                        contents=correction_prompt,
+                    )
+                    answer_text = corrected_response.text
+
+                has_required_sections = (
                     "### Practical Scenario Guide" in answer_text
                     and "### Actual Project Code Flow" in answer_text
                 )
@@ -1105,11 +1128,13 @@ Do not add headings, code, sources, or file paths.
                         "### Actual Project Code Flow\n"
                         f"{answer_text}"
                     )
+
                 verified_answer = inject_verified_code(
-                    response.text,
+                    answer_text,
                     code_cards,
                     minimum_cards=minimum_code_cards,
                 )
+
                 return verified_answer, results
 
             except Exception as error:
