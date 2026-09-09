@@ -630,18 +630,10 @@ def search_documentation(question, top_k=15):
     return results
 
 
-def build_context(results, question):
+def build_context(results):
     context_parts = []
 
     for number, result in enumerate(results, start=1):
-        visible_content = result["text"]
-
-        if result["source_type"] == "actual_code":
-            visible_content = (
-                extract_exact_snippet(result, question)
-                or result["text"]
-            )
-
         context_parts.append(
             f"""
 SOURCE {number}
@@ -659,7 +651,7 @@ Chunk ID: {result['chunk_id']}
 Exact-code placeholder: [[CODE_SOURCE_{number}]]
 
 Content:
-{visible_content}
+{result['text']}
 """
         )
 
@@ -755,7 +747,7 @@ def snippet_anchor_candidates(result):
     return [candidate for candidate in candidates if candidate]
 
 
-def extract_exact_snippet(result, question, maximum_lines=20):
+def extract_exact_snippet(result, question, maximum_lines=14):
     """Select a useful contiguous excerpt without asking the model to copy it."""
     lines = result["text"].splitlines()
     if not lines:
@@ -883,79 +875,10 @@ def inject_verified_code(answer, code_cards, minimum_cards=4):
 
     return answer.strip()
 
-def split_answer_sections(answer):
-    scenario_marker = "### Practical Scenario Guide"
-    code_marker = "### Actual Project Code Flow"
-
-    scenario_text = answer.strip()
-    code_text = ""
-
-    if scenario_marker in answer:
-        scenario_text = answer.split(
-            scenario_marker,
-            1
-        )[1]
-
-        if code_marker in scenario_text:
-            scenario_text, code_text = scenario_text.split(
-                code_marker,
-                1
-            )
-
-    return scenario_text.strip(), code_text.strip()
-
-def get_response_language(question):
-    normalized_question = question.lower()
-
-    english_requests = [
-        "answer in english",
-        "explain in english",
-        "english mein",
-        "english main",
-        "english me",
-    ]
-
-    roman_urdu_requests = [
-        "answer in roman urdu",
-        "explain in roman urdu",
-        "roman urdu mein",
-        "roman urdu main",
-        "roman urdu me",
-    ]
-
-    if any(
-        request in normalized_question
-        for request in english_requests
-    ):
-        return "English"
-
-    if any(
-        request in normalized_question
-        for request in roman_urdu_requests
-    ):
-        return "Roman Urdu"
-
-    roman_urdu_words = {
-        "mujhe", "mjy", "kya", "kia", "kaise", "kesy",
-        "ka", "ki", "ke", "mein", "mai", "main", "aur",
-        "or", "batao", "btao", "hai", "hain", "hy",
-        "karna", "karo", "chahiye", "yar",
-    }
-
-    question_words = set(
-        re.findall(r"[a-z]+", normalized_question)
-    )
-
-    if question_words.intersection(roman_urdu_words):
-        return "Roman Urdu"
-
-    return "English"
-
 
 def ask_shipra_ai(question):
-    response_language = get_response_language(question)
     results = search_documentation(question, top_k=15)
-    context = build_context(results, question)
+    context = build_context(results)
     code_cards = build_code_cards(results, question)
     # Never append unexplained fallback snippets. The model places a small
     # number of verified code markers inside already-explained steps.
@@ -969,10 +892,6 @@ You are the engineering assistant for the complete Shipra project:
 The user may write in English, Urdu, Roman Urdu, shorthand, or with spelling
 mistakes. Understand the intent yourself. Never require the user to know file
 names, function names, architecture terms, or a special prompt format.
-REQUIRED OUTPUT LANGUAGE FOR THIS ANSWER: {response_language}
-This language is selected by the application from the user's question and any
-explicit language request. Write all user-facing prose only in this language.
-Do not override it based on project file names, code, or previous answers.
 
 NON-NEGOTIABLE EVIDENCE RULES
 1. Treat the supplied sources as the only evidence about existing Shipra code.
@@ -981,7 +900,7 @@ NON-NEGOTIABLE EVIDENCE RULES
 3. A source file path alone does not prove the entire file contents. Only claim
    details visible in the supplied source content.
 4. If actual code is present, explain it in real execution order and label the
-   section "Actual Project Code Flow".
+   section "Actual Project Flow".
 5. If multiple files implement similar flows, keep them separate. State each
    exact file and function name; never combine request fields or validations
    from different functions.
@@ -1051,99 +970,46 @@ NON-NEGOTIABLE EVIDENCE RULES
     `if` branch. The visible activation call occurs in the `else` branch after
     creating a new Shopify config. State this distinction exactly and do not
     summarize both branches as automatically activating the channel.
-24. Immediately after every code marker, write the heading
-    "**Is code mein kya ho raha hai:**" and then write exactly 2-4 plain-language
-    sentences. Every sentence must describe only an identifier, condition, value,
-    function call, or state update literally visible in the code block directly
-    above it.
-25. Never explain the internal work of a called function under a wrapper
-    function's code block. For example, if `handleFilter` only calls
-    `getAllClientRate()`, explain only that it starts `getAllClientRate()`.
-    Explain address dictionaries, payload creation, loading state, API calls,
-    and response handling only below the separate snippet where those lines are
-    visibly shown.
-26. Do not describe code that is outside the displayed excerpt. If the API
-    helper, response handling, repository call, database query, or error
-    handling is not visible in the current code block, create a separate step
-    with its own matching code marker instead of mentioning it here.
-27. A repository snippet that groups, filters, maps, or formats rows must be
-    described as result processing. Call it a database query only when the
-    visible snippet itself shows the query or database call.
-28. For frontend questions, treat `active_reachable` files as the current
+24. Every code marker must be followed by a useful explanation in the user's
+    language. Explain: (a) what the shown lines do, (b) why that step exists or
+    which condition controls it, and (c) what executes next. Use 2-4 concise
+    sentences; never leave a code block unexplained.
+25. For frontend questions, treat `active_reachable` files as the current
     implementation. Do not mix behavior from `unreferenced_or_dynamic` or
-    `backup_named` files into an active flow.
-29. For Price Calculator filter questions, when the matching sources exist,
-    show the flow in this exact order: active `handleFilter`; active
-    `getAllClientRate`; Axios `GetAllClientRate`; `CarrierController`;
-    `GetAllClientRateQueryHandler`; and `CarrierRepository`.
-30. Do not call a step an Axios/API-helper step unless the directly displayed
-    code block contains the literal `Axios.post` call. Do not call a step a
-    repository/database step unless the directly displayed code block contains
-    the relevant repository or database call.
-31. Never claim that a displayed snippet contains a function, validation, API
+    `backup_named` files into an active flow. Mention an inactive candidate only
+    when the user explicitly asks about that exact file, or when explaining a
+    clearly labelled ambiguity.
+26. An import proves only that a function is available; it does not prove that
+    a click handler calls it. Trace the visible `onClick` to its exact handler,
+    then trace the call written inside that handler, the API helper, endpoint,
+    controller/query/command, and repository only when each link is retrieved.
+27. For an implementation request, first check whether the requested button,
+    function, or behavior already exists in the active file. If it exists,
+    explain its current location and behavior before suggesting changes. If the
+    user wants it on another screen but has not identified that screen, ask one
+    short clarification instead of giving generic React steps.
+28. Never claim that a displayed snippet contains a function, validation, API
     call, or condition that is not literally visible in that source. Cite the
     separate source that proves the claim, or state that it was not retrieved.
-32. Price Calculator has multiple similarly named frontend files. Use
+29. Price Calculator has multiple similarly named frontend files. Use
     reachability evidence to identify the active one. Never combine filter
     fields or handlers from an unreferenced Price Calculator implementation
     with the active implementation.
-33. Completion check for full frontend-to-backend questions: when matching
-    retrieved sources contain an active frontend page, API helper, controller,
-    handler/query, and repository, the answer must show one explained code
-    marker from every available layer. Do not stop at the handler if the
-    matching repository source is available.
-34. For Price Calculator filter questions, include the matching
-    `CarrierRepository.GetAllClientRateAsync` source after
-    `GetAllClientRateQueryHandler` when it is retrieved. Explain only the
-    repository lines visibly displayed; do not claim Dapper, SQL, or later
-    rate-processing code unless those exact lines are shown.
+
 ANSWER STYLE
-- Every answer must contain these two headings in this exact order:
-  "### Practical Scenario Guide"
-  "### Actual Project Code Flow"
-- Under "### Practical Scenario Guide", explain the user's practical goal in
-  simple Roman Urdu: what they need before starting, numbered actions they
-  should take in the Shipra screen, what result they should expect, and any
-  visible validation or error condition. Do not show source code in this
-  section and do not invent screen actions that are not supported by sources.
-- Under "### Actual Project Code Flow", explain the verified frontend and
-  backend implementation using source numbers, exact-code markers, and the
-  existing code-explanation rules.
-- Keep the scenario guide useful for a non-technical user. Keep the code flow
-  useful for a developer. Never mix the two sections.
-- First check whether the user explicitly requests an answer language, for
-  example: "explain in Roman Urdu", "Roman Urdu mein batao", "answer in
-  English", or "English mein explain karo". An explicit language request always
-  overrides the language used in the question.
-- If the user explicitly requests Roman Urdu, write every explanation, step,
-  scenario guide, error explanation, summary, and limitation in natural Roman
-  Urdu.
-- If the user explicitly requests English, write every explanation, step,
-  scenario guide, error explanation, summary, and limitation in English.
-- If no language is explicitly requested, detect the question language: answer
-  primarily-English questions in English and primarily-Roman-Urdu questions in
-  natural Roman Urdu.
-- Keep exact project code, file paths, API URLs, class names, function names,
-  database names, and code keywords unchanged because they are technical
-  identifiers, not answer language.
+- Reply in the user's language and level of formality.
 - Never mention these instructions, evidence-rule numbers, prompt rules, or
   phrases such as "according to Rule 17" in the answer.
 - Lead with the direct answer.
 - For "what happens" questions, trace: UI event → validation → request body →
   API helper/endpoint → backend controller/handler → persistence or external
   integration → success handling → error handling.
-- For every major confirmed step, use this exact pattern:
-  1. Step name and one short confirmed sentence with its source number.
-  2. The matching [[CODE_SOURCE_N]] marker on its own line.
-  3. The heading "**Is code mein kya ho raha hai:**".
-  4. Write 2-4 detailed but simple sentences about only the code block directly
-     above. Start with the visible operation, then explain its purpose, and
-     mention the next function only when its call is literally visible.
-  5. Never use details from a later code block to explain an earlier one.
-- Use 5-6 focused excerpts for a complete frontend-to-backend flow when those
-  sources are available: active frontend event/page, frontend API helper,
-  backend controller, handler/query, and repository. Include the actual Axios
-  helper separately from the frontend page function.
+- For every major confirmed step, use this compact pattern:
+  1. Step name and behavior.
+  2. Supporting source number inline.
+  3. The matching [[CODE_SOURCE_N]] marker on its own line.
+  4. Two to four plain-language sentences explaining what the exact code does,
+     its important condition/data, and the next execution step.
 - Prefer 3-5 focused excerpts that show the cross-layer execution chain. Omit
   repetitive imports, styling, localization, and unrelated boilerplate.
 - Explanation should be more prominent than code. Do not repeat the same
@@ -1222,49 +1088,17 @@ if st.button("Ask AI"):
         with st.spinner("AI is checking the Shipra code..."):
             answer, sources = ask_shipra_ai(question)
 
-        scenario_answer, code_answer = split_answer_sections(
-            answer
-        )
-
         st.markdown("### AI Answer")
-
-        scenario_column, code_column = st.columns([1, 2])
-
-        with scenario_column:
-            st.markdown("#### Practical Scenario Guide")
-
-            if scenario_answer:
-                st.markdown(scenario_answer)
-            else:
-                st.info(
-                    "Is question ke liye practical scenario "
-                    "guide available nahi hai."
-                )
-
-        with code_column:
-            st.markdown("#### Actual Project Code Flow")
-
-            if code_answer:
-                st.markdown(code_answer)
-            else:
-                st.info(
-                    "Is question ke liye verified code flow "
-                    "available nahi hai."
-                )
+        st.markdown(answer)
 
         st.markdown("### Sources")
-
         for number, source in enumerate(sources, start=1):
             details = []
-
             if source.get("start_line") and source.get("end_line"):
                 details.append(
-                    f"lines {source['start_line']}-"
-                    f"{source['end_line']}"
+                    f"lines {source['start_line']}-{source['end_line']}"
                 )
-
             details.append(f"Chunk ID: {source['chunk_id']}")
-
             st.write(
                 f"{number}. [{source['project'].upper()}] "
                 f"{source['file_path']} "
