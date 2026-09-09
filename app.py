@@ -198,7 +198,7 @@ def search_documentation(question, top_k=12):
             )
 
         path_overlap = query_tokens.intersection(path_tokens[idx])
-        path_score = len(path_overlap) * 4.0
+        path_score = len(path_overlap) * 14.0
 
         rank = semantic_rank.get(idx)
         semantic_score = 0.0 if rank is None else 8.0 / (rank + 1)
@@ -216,7 +216,7 @@ def search_documentation(question, top_k=12):
         if asks_for_backend and project == "backend":
             project_score += 10.0
         if asks_for_flow and is_actual_code:
-            project_score += 12.0
+            project_score += 20.0
 
         score = (lexical_score * 3.0) + path_score + semantic_score + project_score
 
@@ -231,7 +231,7 @@ def search_documentation(question, top_k=12):
 
     for _, idx in scored:
         file_path = metadata[idx].get("file_path", "")
-        if anchors_per_file[file_path] >= 2:
+        if anchors_per_file[file_path] >= 1:
             continue
 
         anchor_indices.append(idx)
@@ -355,6 +355,8 @@ NON-NEGOTIABLE EVIDENCE RULES
    the gap with a generic architecture.
 9. Recommendations are allowed only after confirmed facts, under a separate
    "Recommended Solution" heading.
+10. Never connect a frontend API helper to a backend controller, handler, or repository unless the endpoint/action relationship is visible in the retrieved            sources.
+11. Do not treat Sync Policy activation as Sale Channel configuration activation. If the user's wording could mean multiple flows, explain each flow separately and identify its screen/action.
 
 ANSWER STYLE
 - Reply in the user's language and level of formality.
