@@ -630,10 +630,18 @@ def search_documentation(question, top_k=15):
     return results
 
 
-def build_context(results):
+def build_context(results, question):
     context_parts = []
 
     for number, result in enumerate(results, start=1):
+        visible_content = result["text"]
+
+        if result["source_type"] == "actual_code":
+            visible_content = (
+                extract_exact_snippet(result, question)
+                or result["text"]
+            )
+
         context_parts.append(
             f"""
 SOURCE {number}
@@ -651,7 +659,7 @@ Chunk ID: {result['chunk_id']}
 Exact-code placeholder: [[CODE_SOURCE_{number}]]
 
 Content:
-{result['text']}
+{visible_content}
 """
         )
 
@@ -878,7 +886,7 @@ def inject_verified_code(answer, code_cards, minimum_cards=4):
 
 def ask_shipra_ai(question):
     results = search_documentation(question, top_k=15)
-    context = build_context(results)
+    context = build_context(results, question)
     code_cards = build_code_cards(results, question)
     # Never append unexplained fallback snippets. The model places a small
     # number of verified code markers inside already-explained steps.
