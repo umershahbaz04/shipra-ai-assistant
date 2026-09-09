@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import os
+import posixpath
 import re
 import shutil
 import tempfile
@@ -281,6 +282,107 @@ def collect_tree(root, project, path_prefix, seen_hashes):
     return collected_chunks, collected_metadata
 
 
+def analyze_frontend_reachability(chunks, metadata):
+    """Mark frontend files reachable from real application entry points."""
+    source_by_path = {}
+
+    for chunk, item in zip(chunks, metadata):
+        if item.get("project") != "frontend":
+            continue
+        path = item.get("file_path", "")
+        source_by_path.setdefault(path, []).append(chunk)
+
+    all_paths = set(source_by_path)
+    import_graph = {path: set() for path in all_paths}
+    inbound_counts = Counter()
+    import_pattern = re.compile(
+        r"(?:from\s+|import\s*\(|require\s*\()"
+        r"[\"']([^\"']+)[\"']"
+    )
+
+    def resolve_import(importer, specifier):
+        if not specifier.startswith("."):
+            return None
+
+        base = posixpath.normpath(
+            posixpath.join(posixpath.dirname(importer), specifier)
+        )
+        candidates = [base]
+        candidates.extend(
+            f"{base}{extension}"
+            for extension in (".js", ".jsx", ".ts", ".tsx")
+        )
+        candidates.extend(
+            f"{base}/index{extension}"
+            for extension in (".js", ".jsx", ".ts", ".tsx")
+        )
+
+        return next(
+            (candidate for candidate in candidates if candidate in all_paths),
+            None,
+        )
+
+    for importer, source_parts in source_by_path.items():
+        source = "\n".join(source_parts)
+        for specifier in import_pattern.findall(source):
+            target = resolve_import(importer, specifier)
+            if target and target != importer:
+                import_graph[importer].add(target)
+
+    for targets in import_graph.values():
+        for target in targets:
+            inbound_counts[target] += 1
+
+    entry_suffixes = (
+        "/src/index.js",
+        "/src/index.jsx",
+        "/src/main.js",
+        "/src/main.jsx",
+        "/src/main.ts",
+        "/src/main.tsx",
+    )
+    entry_points = {
+        path for path in all_paths if path.endswith(entry_suffixes)
+    }
+
+    reachable = set(entry_points)
+    pending = list(entry_points)
+    while pending:
+        importer = pending.pop()
+        for target in import_graph.get(importer, ()):
+            if target not in reachable:
+                reachable.add(target)
+                pending.append(target)
+
+    backup_pattern = re.compile(
+        r"(?i)(?:^|[/_.-])(backup|bak|copy|old|legacy|deprecated|unused)"
+    )
+
+    for item in metadata:
+        if item.get("project") != "frontend":
+            continue
+
+        path = item.get("file_path", "")
+        is_backup_named = bool(backup_pattern.search(path))
+        is_reachable = path in reachable
+        item["frontend_reachable"] = is_reachable
+        item["frontend_inbound_references"] = inbound_counts.get(path, 0)
+        item["implementation_status"] = (
+            "backup_named"
+            if is_backup_named
+            else "active_reachable"
+            if is_reachable
+            else "unreferenced_or_dynamic"
+        )
+
+    status_counts = Counter(
+        item.get("implementation_status")
+        for item in metadata
+        if item.get("project") == "frontend"
+    )
+    print(f"Frontend reachability: {dict(status_counts)}")
+
+
 def retain_original_backend_docs(project_root):
     chunks_path = project_root / "chunks.json"
     metadata_path = project_root / "metadata.json"
@@ -349,6 +451,8 @@ def build_embeddings(project_root, chunks, metadata):
                     f"File: {item.get('file_path', '')}",
                     f"Layer: {item.get('layer', '')}",
                     f"Symbol: {item.get('symbol', '')}",
+                    f"Implementation status: {item.get('implementation_status', '')}",
+                    f"Frontend reachable: {item.get('frontend_reachable', '')}",
                     chunk,
                 ]
             )
@@ -421,6 +525,7 @@ def main():
             path_prefix="Shipra.Frontend",
             seen_hashes=seen_hashes,
         )
+        analyze_frontend_reachability(new_chunks, new_metadata)
         all_chunks.extend(new_chunks)
         all_metadata.extend(new_metadata)
 

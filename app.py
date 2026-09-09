@@ -39,6 +39,9 @@ STOP_WORDS = {
 
 def normalize_token(word):
     word = word.lower()
+    versioned_name = re.fullmatch(r"([a-z]+)\d+", word)
+    if versioned_name:
+        word = versioned_name.group(1)
 
     aliases = {
         "frontend": "frontend",
@@ -68,7 +71,10 @@ def normalize_token(word):
         return "config"
     if word.startswith("creat"):
         return "create"
-    if word in {"add", "adding", "added"}:
+    if word in {
+        "add", "adding", "added", "implement", "implementation",
+        "lagana", "lagao", "lagay", "lagaye", "banana", "banao",
+    }:
         return "create"
     if word.startswith("updat"):
         return "update"
@@ -116,6 +122,7 @@ def load_data():
     path_tokens = []
     token_document_frequency = Counter()
     file_chunk_lookup = defaultdict(dict)
+    linkable_identifiers = set()
 
     for idx, (chunk, item) in enumerate(zip(chunks, metadata)):
         file_path = item.get("file_path", "")
@@ -131,6 +138,20 @@ def load_data():
         if isinstance(chunk_number, int):
             file_chunk_lookup[file_path][chunk_number] = idx
 
+        if (
+            item.get("project") == "backend"
+            or "/src/api/" in file_path
+            or "/src/services/" in file_path
+        ):
+            linkable_identifiers.update(
+                re.findall(
+                    r"\b((?:Get|Create|Update|Delete|Save|Load|Fetch|"
+                    r"Calculate|Validate|Generate|Process|Submit)"
+                    r"[A-Z][A-Za-z0-9]+)\b",
+                    chunk,
+                )
+            )
+
     return (
         chunks,
         metadata,
@@ -140,6 +161,7 @@ def load_data():
         path_tokens,
         token_document_frequency,
         file_chunk_lookup,
+        linkable_identifiers,
     )
 
 
@@ -152,6 +174,7 @@ def load_data():
     path_tokens,
     token_document_frequency,
     file_chunk_lookup,
+    linkable_identifiers,
 ) = load_data()
 
 
@@ -196,6 +219,14 @@ def search_documentation(question, top_k=15):
         {"sale", "channel", "connect", "create"}.issubset(query_tokens)
         and "sync" not in query_tokens
     )
+    asks_for_filter_button = (
+        "filter" in query_tokens and "button" in query_tokens
+    )
+    asks_for_price_calculator = {
+        "price",
+        "calculator",
+    }.issubset(query_tokens)
+    asks_for_flow = asks_for_flow or asks_for_filter_button
 
     scored = []
     total_documents = len(chunks)
@@ -218,10 +249,29 @@ def search_documentation(question, top_k=15):
 
         project = metadata[idx].get("project", "backend")
         file_path = metadata[idx].get("file_path", "")
+        implementation_status = metadata[idx].get(
+            "implementation_status",
+            "unknown",
+        )
         is_actual_code = (
             metadata[idx].get("source_type") == "actual_code"
             or file_path != "Shipra.Backend.API documentation"
         )
+
+        explicitly_named = any(
+            name in chunks[idx] or name.lower() in file_path.lower()
+            for name in query_code_names
+        )
+        if (
+            project == "frontend"
+            and asks_for_flow
+            and implementation_status in {
+                "unreferenced_or_dynamic",
+                "backup_named",
+            }
+            and not explicitly_named
+        ):
+            continue
 
         project_score = 0.0
         if asks_for_frontend and project == "frontend":
@@ -230,6 +280,18 @@ def search_documentation(question, top_k=15):
             project_score += 10.0
         if asks_for_flow and is_actual_code:
             project_score += 20.0
+        if project == "frontend":
+            if implementation_status == "active_reachable":
+                project_score += 180.0
+                inbound_references = metadata[idx].get(
+                    "frontend_inbound_references",
+                    0,
+                )
+                project_score += min(float(inbound_references) * 5.0, 40.0)
+            elif implementation_status == "unreferenced_or_dynamic":
+                project_score -= 220.0
+            elif implementation_status == "backup_named":
+                project_score -= 500.0
 
         exact_query_score = sum(
             500.0
@@ -250,6 +312,24 @@ def search_documentation(question, top_k=15):
                 intent_score -= 1000.0
             if "syncpolic" in lowered_path:
                 intent_score -= 1000.0
+        if asks_for_filter_button:
+            if "handleFilter" in chunks[idx]:
+                intent_score += 650.0
+            if "onClick={handleFilter}" in chunks[idx]:
+                intent_score += 750.0
+            if "/src/pages/" in lowered_path:
+                intent_score += 120.0
+            if (
+                ("modal" in lowered_path or "drawer" in lowered_path)
+                and "modal" not in query_tokens
+                and "drawer" not in query_tokens
+            ):
+                intent_score -= 250.0
+        if asks_for_price_calculator:
+            if "/pages/orders/pricecalculator" in lowered_path:
+                intent_score += 500.0
+            if "pricecalculator2/index.js" in lowered_path:
+                intent_score += 500.0
 
         score = (
             (lexical_score * 3.0)
@@ -276,7 +356,9 @@ def search_documentation(question, top_k=15):
         and metadata[idx].get("source_type") == "actual_code"
     ][:8]
 
-    for seed_idx in frontend_seeds:
+    discovered_action_identifiers = set()
+
+    for seed_position, seed_idx in enumerate(frontend_seeds):
         identifiers = re.findall(
             r"\b[A-Z][A-Za-z0-9]{5,}\b",
             chunks[seed_idx],
@@ -285,6 +367,21 @@ def search_documentation(question, top_k=15):
             identifier_tokens = tokenize(identifier)
             if len(identifier_tokens.intersection(query_tokens)) >= 2:
                 link_identifiers.add(identifier)
+
+        # Also follow action/API calls discovered in the active UI even when
+        # their words are not present in a natural-language question.
+        called_identifiers = re.findall(
+            r"\b((?:Get|Create|Update|Delete|Save|Load|Fetch|Calculate|"
+            r"Validate|Generate|Process|Submit)[A-Z][A-Za-z0-9]+)\s*\(",
+            chunks[seed_idx],
+        )
+        for identifier in called_identifiers:
+            if identifier in linkable_identifiers:
+                if seed_position < 2:
+                    discovered_action_identifiers.add(identifier)
+
+    if discovered_action_identifiers:
+        link_identifiers = discovered_action_identifiers
 
     if asks_for_sale_channel_create:
         # The create/connect modal has one canonical cross-layer call. Keeping
@@ -454,6 +551,15 @@ def search_documentation(question, top_k=15):
             "Shipra.Backend.API documentation",
         )
         display_symbol = item.get("symbol")
+        matching_links = sorted(
+            (
+                identifier
+                for identifier in link_identifiers
+                if identifier in chunks[idx] or identifier.lower() in file_path.lower()
+            ),
+            key=len,
+            reverse=True,
+        )
 
         # A 120-line chunk may contain many methods, so the indexer's first
         # detected symbol is not always the method relevant to the matched
@@ -481,6 +587,20 @@ def search_documentation(question, top_k=15):
             "CreateSaleChannelConfig" in chunks[idx]
         ):
             display_symbol = "SaleChannelConfigRepository.CreateSaleChannelConfig"
+        elif matching_links:
+            matched_call = matching_links[0]
+            file_name = file_path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+            if file_path.endswith("/api/AxiosInterceptors.js"):
+                display_symbol = matched_call
+            elif file_name.endswith("Controller"):
+                display_symbol = f"{file_name}.{matched_call}"
+            elif file_name.endswith(("CommandHandler", "QueryHandler")):
+                display_symbol = f"{file_name}.HandleRequest"
+            elif file_name.endswith("Repository"):
+                async_name = f"{matched_call}Async"
+                display_symbol = (
+                    async_name if async_name in chunks[idx] else matched_call
+                )
 
         results.append(
             {
@@ -491,6 +611,16 @@ def search_documentation(question, top_k=15):
                 "file_path": file_path,
                 "section": item.get("section_title", "Untitled section"),
                 "symbol": display_symbol,
+                "implementation_status": item.get(
+                    "implementation_status",
+                    "not_applicable",
+                ),
+                "frontend_reachable": item.get("frontend_reachable"),
+                "frontend_inbound_references": item.get(
+                    "frontend_inbound_references",
+                    0,
+                ),
+                "matched_identifiers": matching_links,
                 "start_line": item.get("start_line"),
                 "end_line": item.get("end_line"),
                 "text": chunks[idx],
@@ -512,6 +642,10 @@ Source type: {result['source_type']}
 File: {result['file_path']}
 Section: {result['section']}
 Symbol: {result['symbol'] or 'not detected'}
+Implementation status: {result['implementation_status']}
+Frontend reachable from entry point: {result['frontend_reachable']}
+Inbound frontend references: {result['frontend_inbound_references']}
+Matched cross-layer identifiers: {', '.join(result['matched_identifiers']) or 'none'}
 Lines: {result['start_line'] or '?'}-{result['end_line'] or '?'}
 Chunk ID: {result['chunk_id']}
 Exact-code placeholder: [[CODE_SOURCE_{number}]]
@@ -547,6 +681,39 @@ def snippet_anchor_candidates(result):
     """Return path-confirmed anchors ordered by usefulness."""
     path = result["file_path"].lower()
     start_line = result.get("start_line") or 1
+
+    if path.endswith("/pages/orders/pricecalculator2/index.js"):
+        if start_line <= 50:
+            return [
+                "const handleFilter =",
+                "const getAllClientRate =",
+                "const getFilteredData =",
+                "onClick={handleFilter}",
+            ]
+        return [
+            "onClick={handleFilter}",
+            "const getAllClientRate =",
+            "const getFilteredData =",
+            "const handleFilter =",
+        ]
+    if path.endswith("/api/axiosinterceptors.js") and (
+        "GetAllClientRate" in result.get("text", "")
+    ):
+        return ["export const GetAllClientRate", "GetAllClientRate"]
+    if path.endswith("/api/carriercontroller.cs") and (
+        "GetAllClientRate" in result.get("text", "")
+    ):
+        return ['[HttpPost("GetAllClientRate")]', "GetAllClientRate"]
+    if path.endswith("/getallclientrate/getallclientratequery.cs"):
+        return [
+            "protected override async Task<ServiceResultDTO> HandleRequest",
+            "public class GetAllClientRateQuery",
+            "GetAllClientRateAsync",
+        ]
+    if path.endswith("/carrierrepository.cs") and (
+        "GetAllClientRateAsync" in result.get("text", "")
+    ):
+        return ["public async Task<dynamic> GetAllClientRateAsync"]
 
     if path.endswith("/salechannelconnectmodal.js"):
         if start_line <= 50:
@@ -807,6 +974,27 @@ NON-NEGOTIABLE EVIDENCE RULES
     language. Explain: (a) what the shown lines do, (b) why that step exists or
     which condition controls it, and (c) what executes next. Use 2-4 concise
     sentences; never leave a code block unexplained.
+25. For frontend questions, treat `active_reachable` files as the current
+    implementation. Do not mix behavior from `unreferenced_or_dynamic` or
+    `backup_named` files into an active flow. Mention an inactive candidate only
+    when the user explicitly asks about that exact file, or when explaining a
+    clearly labelled ambiguity.
+26. An import proves only that a function is available; it does not prove that
+    a click handler calls it. Trace the visible `onClick` to its exact handler,
+    then trace the call written inside that handler, the API helper, endpoint,
+    controller/query/command, and repository only when each link is retrieved.
+27. For an implementation request, first check whether the requested button,
+    function, or behavior already exists in the active file. If it exists,
+    explain its current location and behavior before suggesting changes. If the
+    user wants it on another screen but has not identified that screen, ask one
+    short clarification instead of giving generic React steps.
+28. Never claim that a displayed snippet contains a function, validation, API
+    call, or condition that is not literally visible in that source. Cite the
+    separate source that proves the claim, or state that it was not retrieved.
+29. Price Calculator has multiple similarly named frontend files. Use
+    reachability evidence to identify the active one. Never combine filter
+    fields or handlers from an unreferenced Price Calculator implementation
+    with the active implementation.
 
 ANSWER STYLE
 - Reply in the user's language and level of formality.
