@@ -883,6 +883,27 @@ def inject_verified_code(answer, code_cards, minimum_cards=4):
 
     return answer.strip()
 
+def split_answer_sections(answer):
+    scenario_marker = "### Practical Scenario Guide"
+    code_marker = "### Actual Project Code Flow"
+
+    scenario_text = answer.strip()
+    code_text = ""
+
+    if scenario_marker in answer:
+        scenario_text = answer.split(
+            scenario_marker,
+            1
+        )[1]
+
+        if code_marker in scenario_text:
+            scenario_text, code_text = scenario_text.split(
+                code_marker,
+                1
+            )
+
+    return scenario_text.strip(), code_text.strip()
+
 
 def ask_shipra_ai(question):
     results = search_documentation(question, top_k=15)
