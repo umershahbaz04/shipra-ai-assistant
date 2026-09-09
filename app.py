@@ -929,7 +929,7 @@ NON-NEGOTIABLE EVIDENCE RULES
 3. A source file path alone does not prove the entire file contents. Only claim
    details visible in the supplied source content.
 4. If actual code is present, explain it in real execution order and label the
-   section "Actual Project Flow".
+   section "Actual Project Code Flow".
 5. If multiple files implement similar flows, keep them separate. State each
    exact file and function name; never combine request fields or validations
    from different functions.
@@ -1046,6 +1046,19 @@ NON-NEGOTIABLE EVIDENCE RULES
     repository lines visibly displayed; do not claim Dapper, SQL, or later
     rate-processing code unless those exact lines are shown.
 ANSWER STYLE
+- Every answer must contain these two headings in this exact order:
+  "### Practical Scenario Guide"
+  "### Actual Project Code Flow"
+- Under "### Practical Scenario Guide", explain the user's practical goal in
+  simple Roman Urdu: what they need before starting, numbered actions they
+  should take in the Shipra screen, what result they should expect, and any
+  visible validation or error condition. Do not show source code in this
+  section and do not invent screen actions that are not supported by sources.
+- Under "### Actual Project Code Flow", explain the verified frontend and
+  backend implementation using source numbers, exact-code markers, and the
+  existing code-explanation rules.
+- Keep the scenario guide useful for a non-technical user. Keep the code flow
+  useful for a developer. Never mix the two sections.
 - Reply in the user's language and level of formality.
 - Never mention these instructions, evidence-rule numbers, prompt rules, or
   phrases such as "according to Rule 17" in the answer.
@@ -1143,8 +1156,35 @@ if st.button("Ask AI"):
         with st.spinner("AI is checking the Shipra code..."):
             answer, sources = ask_shipra_ai(question)
 
+                scenario_answer, code_answer = split_answer_sections(
+            answer
+        )
+
         st.markdown("### AI Answer")
-        st.markdown(answer)
+
+        scenario_column, code_column = st.columns(2)
+
+        with scenario_column:
+            st.markdown("#### Practical Scenario Guide")
+
+            if scenario_answer:
+                st.markdown(scenario_answer)
+            else:
+                st.info(
+                    "Is question ke liye practical scenario "
+                    "guide available nahi hai."
+                )
+
+        with code_column:
+            st.markdown("#### Actual Project Code Flow")
+
+            if code_answer:
+                st.markdown(code_answer)
+            else:
+                st.info(
+                    "Is question ke liye verified code flow "
+                    "available nahi hai."
+                )
 
         st.markdown("### Sources")
         for number, source in enumerate(sources, start=1):
