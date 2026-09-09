@@ -153,7 +153,7 @@ def load_data():
 ) = load_data()
 
 
-def search_documentation(question, top_k=12):
+def search_documentation(question, top_k=15):
     query_tokens = tokenize(question)
 
     question_embedding = embedding_model.encode(
@@ -225,42 +225,50 @@ def search_documentation(question, top_k=12):
 
     scored.sort(key=lambda item: item[0], reverse=True)
 
-    # Select strong anchors while preventing one large file from taking every slot.
+    # For flow questions, select evidence across distinct project layers. This
+    # prevents a similarly named update/sync feature from crowding out the real
+    # frontend -> controller -> handler -> repository -> entity chain.
     anchor_indices = []
     anchors_per_file = Counter()
+    used_categories = set()
 
     for _, idx in scored:
         file_path = metadata[idx].get("file_path", "")
+        project = metadata[idx].get("project", "backend")
+        layer = metadata[idx].get("layer", "documentation")
+        category = (project, layer)
+
         if anchors_per_file[file_path] >= 1:
+            continue
+        if asks_for_flow and category in used_categories:
             continue
 
         anchor_indices.append(idx)
         anchors_per_file[file_path] += 1
+        used_categories.add(category)
 
         if len(anchor_indices) >= 6:
             break
 
-    # Include adjacent chunks from each matching file so complete functions survive
-    # character-based chunk boundaries.
-    selected_indices = []
+    # Include every layer anchor first, then add neighboring chunks in rounds.
+    # This preserves complete functions without letting the first file consume
+    # the whole context budget.
+    selected_indices = list(anchor_indices)
 
-    for anchor_idx in anchor_indices:
-        item = metadata[anchor_idx]
-        file_path = item.get("file_path", "")
-        chunk_number = item.get("chunk_index")
+    for offset in (-1, 1, -2, 2):
+        for anchor_idx in anchor_indices:
+            item = metadata[anchor_idx]
+            file_path = item.get("file_path", "")
+            chunk_number = item.get("chunk_index")
+            if not isinstance(chunk_number, int):
+                continue
 
-        neighbor_indices = [anchor_idx]
-        if isinstance(chunk_number, int):
-            lookup = file_chunk_lookup.get(file_path, {})
-            neighbor_indices = [
-                lookup[number]
-                for number in range(chunk_number - 1, chunk_number + 2)
-                if number in lookup
-            ]
+            neighbor_idx = file_chunk_lookup.get(file_path, {}).get(
+                chunk_number + offset
+            )
+            if neighbor_idx is not None and neighbor_idx not in selected_indices:
+                selected_indices.append(neighbor_idx)
 
-        for idx in neighbor_indices:
-            if idx not in selected_indices:
-                selected_indices.append(idx)
             if len(selected_indices) >= top_k:
                 break
 
@@ -322,7 +330,7 @@ Content:
 
 
 def ask_shipra_ai(question):
-    results = search_documentation(question, top_k=12)
+    results = search_documentation(question, top_k=15)
     context = build_context(results)
 
     prompt = f"""
@@ -355,8 +363,12 @@ NON-NEGOTIABLE EVIDENCE RULES
    the gap with a generic architecture.
 9. Recommendations are allowed only after confirmed facts, under a separate
    "Recommended Solution" heading.
-10. Never connect a frontend API helper to a backend controller, handler, or repository unless the endpoint/action relationship is visible in the retrieved            sources.
-11. Do not treat Sync Policy activation as Sale Channel configuration activation. If the user's wording could mean multiple flows, explain each flow separately and identify its screen/action.
+10. Never connect a frontend API helper to a backend controller, handler, or
+    repository unless the endpoint/action relationship is visible in the
+    retrieved sources.
+11. Do not treat Sync Policy activation as Sale Channel configuration
+    activation. If the wording could mean multiple flows, explain each flow
+    separately and identify its screen/action.
 
 ANSWER STYLE
 - Reply in the user's language and level of formality.
