@@ -145,18 +145,13 @@ def redact_high_confidence_secrets(text):
         r"(\s*[=:]\s*)"
         r"([\"'])([^\"'\r\n]{6,})([\"'])"
     )
-    text = assignment_pattern.sub(
+    return assignment_pattern.sub(
         lambda match: (
             f"{match.group(1)}{match.group(2)}"
             f"{match.group(3)}[REDACTED]{match.group(5)}"
         ),
         text,
     )
-
-    connection_password = re.compile(
-        r"(?i)(password|pwd)(\s*=\s*)([^;\r\n]+)"
-    )
-    return connection_password.sub(r"\1\2[REDACTED]", text)
 
 
 def detect_symbol(lines):

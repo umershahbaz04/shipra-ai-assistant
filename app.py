@@ -252,10 +252,12 @@ def search_documentation(question, top_k=15):
         linked_scores = []
         for score, idx in scored:
             item = metadata[idx]
+            file_path = item.get("file_path", "")
+            symbol = item.get("symbol") or ""
             searchable = "\n".join(
                 [
-                    item.get("file_path", ""),
-                    item.get("symbol") or "",
+                    file_path,
+                    symbol,
                     chunks[idx],
                 ]
             )
@@ -263,8 +265,26 @@ def search_documentation(question, top_k=15):
                 identifier in searchable
                 for identifier in link_identifiers
             )
+            canonical_links = sum(
+                (
+                    f"/{identifier.lower()}/" in file_path.lower()
+                    or symbol.lower() in {
+                        identifier.lower(),
+                        f"{identifier.lower()}command",
+                        f"{identifier.lower()}commandhandler",
+                    }
+                )
+                for identifier in link_identifiers
+            )
             exact_link_counts[idx] = exact_links
-            linked_scores.append((score + (exact_links * 150.0), idx))
+            linked_scores.append(
+                (
+                    score
+                    + (exact_links * 150.0)
+                    + (canonical_links * 600.0),
+                    idx,
+                )
+            )
 
         scored = sorted(
             linked_scores,
@@ -281,6 +301,54 @@ def search_documentation(question, top_k=15):
     anchor_indices = []
     anchors_per_file = Counter()
     used_categories = set()
+
+    # Reserve the first anchors for the real cross-layer call chain. Without
+    # this, an unrelated page/repository can occupy a category merely because
+    # it is semantically similar to the user's wording.
+    if asks_for_flow and link_identifiers:
+        stage_checks = [
+            lambda project, path: (
+                project == "frontend" and "/src/components/" in path
+            ),
+            lambda project, path: (
+                project == "frontend"
+                and ("/src/api/" in path or "/src/services/" in path)
+            ),
+            lambda project, path: (
+                project == "backend"
+                and (".Web/" in path or "/Api/" in path)
+            ),
+            lambda project, path: (
+                project == "backend"
+                and (".Application/" in path or "/Features/" in path)
+            ),
+            lambda project, path: (
+                project == "backend"
+                and (".Infrastructure/" in path or "/Repository/" in path)
+            ),
+            lambda project, path: (
+                project == "backend" and ".Core/" in path
+            ),
+        ]
+
+        for stage_check in stage_checks:
+            for _, idx in scored:
+                file_path = metadata[idx].get("file_path", "")
+                project = metadata[idx].get("project", "backend")
+
+                if exact_link_counts.get(idx, 0) <= 0:
+                    continue
+                if file_path in anchors_per_file:
+                    continue
+                if not stage_check(project, file_path):
+                    continue
+
+                anchor_indices.append(idx)
+                anchors_per_file[file_path] += 1
+                used_categories.add(
+                    (project, metadata[idx].get("layer", "documentation"))
+                )
+                break
 
     for _, idx in scored:
         file_path = metadata[idx].get("file_path", "")
@@ -426,7 +494,8 @@ NON-NEGOTIABLE EVIDENCE RULES
 13. When the user asks how a feature works, include the most important actual
     project code beside the related step. Copy only code that is visible in the
     retrieved sources; never reconstruct, autocomplete, or invent missing code.
-14. Keep each code excerpt short (normally 5-12 lines). Before every excerpt,
+14. Show detailed but focused excerpts (normally 15-25 lines when that many
+    relevant lines exist). Before every excerpt,
     write the exact file path, function/class name, and supporting source number.
     After it, explain in simple language what those exact lines do and what runs
     next. Do not dump a complete file.
@@ -434,6 +503,16 @@ NON-NEGOTIABLE EVIDENCE RULES
     "Example Code" block when explaining current behavior. If the needed lines
     are not present in the retrieved sources, say that the code for that step
     was not retrieved instead of guessing it.
+16. Never print lines containing credentials, access tokens, API keys, client
+    secrets, passwords, or their values. Explain that sensitive configuration
+    is handled there, but choose a safe neighboring excerpt instead.
+17. Exact Shipra routing rule: the frontend helper `CreateSaleChannelConfig`
+    must be traced through `/SaleChannel/CreateSaleChannelConfig`,
+    `SaleChannelController.CreateSaleChannelConfig`, and
+    `CreateSaleChannelConfigCommandHandler`. Do not replace that handler with
+    `CreateShopifySaleChannelConfigCommandHandler`. Shopify-specific logic may
+    only be described when it is visibly executed inside the matching general
+    handler or is called by that exact route.
 
 ANSWER STYLE
 - Reply in the user's language and level of formality.
@@ -444,9 +523,9 @@ ANSWER STYLE
 - For every major confirmed step, use this compact pattern:
   1. Step name and behavior.
   2. `File: exact/path` and `Function/Class: exact name`.
-  3. A short fenced code block copied verbatim from that source.
+  3. A focused fenced code block copied verbatim from that source.
   4. One or two plain-language sentences explaining the code.
-- Prefer 3-6 decisive excerpts that show the cross-layer execution chain. Omit
+- Prefer 4-6 decisive excerpts that show the cross-layer execution chain. Omit
   repetitive imports, styling, localization, and unrelated boilerplate.
 - Use numbered steps for flows and implementation guidance.
 - Mention supporting source numbers inline, for example [Source 2].
