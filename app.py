@@ -1156,7 +1156,7 @@ if st.button("Ask AI"):
         with st.spinner("AI is checking the Shipra code..."):
             answer, sources = ask_shipra_ai(question)
 
-                scenario_answer, code_answer = split_answer_sections(
+        scenario_answer, code_answer = split_answer_sections(
             answer
         )
 
@@ -1187,13 +1187,18 @@ if st.button("Ask AI"):
                 )
 
         st.markdown("### Sources")
+
         for number, source in enumerate(sources, start=1):
             details = []
+
             if source.get("start_line") and source.get("end_line"):
                 details.append(
-                    f"lines {source['start_line']}-{source['end_line']}"
+                    f"lines {source['start_line']}-"
+                    f"{source['end_line']}"
                 )
+
             details.append(f"Chunk ID: {source['chunk_id']}")
+
             st.write(
                 f"{number}. [{source['project'].upper()}] "
                 f"{source['file_path']} "
