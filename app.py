@@ -1027,6 +1027,10 @@ CLARIFICATION RULE — OVERRIDES THE NORMAL ANSWER FORMAT
 If the user's request has multiple materially different meanings and
 the supplied conversation does not resolve them, ask ONE short clarification
 question in the required output language before giving instructions.
+Do not ask users to choose components, libraries, or implementation patterns.
+Choose based on relevant existing project code and explain the choice.
+If multiple implementations exist, use the one matching the requested page.
+If evidence is insufficient, state what needs verification.
 
 Start this response with exactly: CLARIFICATION:
 Do not include scenario headings, code, sources, or implementation steps.
@@ -1265,6 +1269,13 @@ USER QUESTION
                     "For other questions, identify their own ambiguity; "
                     "do not reuse the table example blindly.\n"
                     "If the user already specifies the meaning, proceed.\n"
+                    "Do not ask the user to choose implementation details "
+                    "such as DataGridComponent versus Table, libraries, "
+                    "styling, or component architecture. These decisions "
+                    "belong in the project-based answer.\n"
+                    "A request for a frontend orders table is clear enough. "
+                    "A request for a regular-orders frontend table is also "
+                    "clear enough. Set needs_clarification to false.\n"
                     "Return only a JSON object with two keys: "
                     "'needs_clarification' (boolean) and "
                     "'question' (one short question, or an empty string).\n"
