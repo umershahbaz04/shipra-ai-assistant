@@ -1561,7 +1561,7 @@ def generate_project_prompt(question):
 
     results = search_documentation(
         question,
-        top_k=6,
+        top_k=4,
     )
 
     results = filter_relevant_results(
@@ -1569,15 +1569,25 @@ def generate_project_prompt(question):
         question,
     )
 
-    context = build_context(
-        results,
-        question,
+context_parts = []
+
+for number, result in enumerate(results[:4], start=1):
+    context_parts.append(
+        f"""
+SOURCE {number}
+File: {result['file_path']}
+Function/Class: {result.get('symbol') or 'not detected'}
+Project: {result['project']}
+Relevant code/context:
+{result['text'][:1800]}
+"""
     )
 
-    generation_prompt = f"""
-You are generating a coding prompt for another AI developer.
+context = "\n".join(context_parts)
 
-The coding task is for the Shipra project.
+generation_prompt = f"""
+You generate concise coding prompts for developers working
+on the Shipra project.
 
 Required language: {response_language}
 
@@ -1587,57 +1597,41 @@ USER REQUEST:
 VERIFIED PROJECT SOURCES:
 {context}
 
-Create a concise, implementation-ready coding prompt.
+Create a short, accurate coding prompt for another AI coding tool.
 
-Rules:
+STRICT RULES:
 
-1. Use only verified project facts from the supplied sources.
+- Maximum 350 words.
+- Do NOT write implementation code.
+- Do NOT output CODE_SOURCE placeholders.
+- Do NOT mention chunk IDs or source numbers.
+- Mention maximum 3 relevant existing files/functions.
+- Prefer CREATE files when the user asks how to create/place something.
+- Do not include edit or draft implementations unless they are essential.
+- Never invent a Shipra file, API, component, route, function, or behavior.
+- Only describe facts supported by VERIFIED PROJECT SOURCES.
+- If something is new, label it as proposed.
+- Do not over-explain existing code.
+- Avoid duplicate references.
+- Focus specifically on the user's requested task.
 
-2. Never invent:
-- file paths
-- functions
-- classes
-- APIs
-- database tables
-- routes
-- screens
-- components
+Return the prompt using ONLY these sections:
 
-3. If the requested feature does not already exist,
-clearly describe it as a NEW or PROPOSED implementation.
+Task
 
-4. Existing Shipra code may be used as a reference pattern.
+Relevant Existing Project References
 
-5. Mention only the most relevant verified files/functions.
+Requirements
 
-6. Do not include source code.
+Important Constraints
 
-7. Do not include long explanations.
+Verification
 
-8. The final prompt must contain:
+The Requirements section should normally contain only 4-7 concise items.
 
-Goal
+The Verification section should contain only 2-4 checks.
 
-Verified Project References
-
-Implementation Requirements
-
-Constraints
-
-Integration Requirements
-
-Testing Requirements
-
-9. If an exact implementation is not found,
-say:
-
-"No verified existing implementation for this feature
-was found in the retrieved project sources."
-
-Then explain which verified existing project pattern
-should be used as a reference.
-
-Return ONLY the final coding prompt.
+Return ONLY the coding prompt.
 """
 
     response = client.models.generate_content(
@@ -1659,6 +1653,12 @@ PROMPT TO VALIDATE:
 
 Rules:
 
+- Final prompt must remain under 350 words.
+- Do not add new requirements unless necessary for accuracy.
+- Remove duplicate or irrelevant references.
+- Maximum 3 existing project references.
+- Never output [[CODE_SOURCE_N]] placeholders.
+- Keep requirements concise.
 - Every existing Shipra file path must be supported by the sources.
 - Every existing function/class/API must be supported by the sources.
 - Remove unsupported project claims.
