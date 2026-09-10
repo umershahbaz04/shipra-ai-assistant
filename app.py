@@ -1023,24 +1023,15 @@ REQUIRED OUTPUT LANGUAGE FOR THIS ANSWER: {response_language}
 This language is selected by the application from the user's question and any
 explicit language request. Write all user-facing prose only in this language.
 Do not override it based on project file names, code, or previous answers.
-CLARIFICATION RULE — OVERRIDES THE NORMAL ANSWER FORMAT
-If the user's request has multiple materially different meanings and
-the supplied conversation does not resolve them, ask ONE short clarification
-question in the required output language before giving instructions.
-Do not ask users to choose components, libraries, or implementation patterns.
-Choose based on relevant existing project code and explain the choice.
-If multiple implementations exist, use the one matching the requested page.
-If evidence is insufficient, state what needs verification.
-
-Start this response with exactly: CLARIFICATION:
-Do not include scenario headings, code, sources, or implementation steps.
-
-Example: "How to create a table?" does not specify a frontend table
-or a database table. Ask which one the user means.
-Do not infer intent merely because a retrieved file contains a matching word.
-Table configuration is not evidence of table creation.
-Do not ask again when the user has already clearly specified their intent.
-Do not invent screens, permissions, buttons, or workflows.
+CLARIFICATION RULE — OVERRIDES THE NORMAL ANSWER FORMATREQUEST HANDLING
+A separate clarification check has already approved this request.
+Do not ask another clarification question.
+Do not ask the user to choose components, libraries, or implementation patterns.
+Use the relevant existing project code to choose an implementation.
+State any necessary assumption clearly.
+If source evidence is missing, explain what cannot be verified.
+Never invent screens, permissions, buttons, or workflows.
+Table configuration is not evidence of creating a new table.
 
 NON-NEGOTIABLE EVIDENCE RULES
 1. Treat the supplied sources as the only evidence about existing Shipra code.
@@ -1306,7 +1297,24 @@ USER QUESTION
                     or not isinstance(decision.get("question"), str)
                 ):
                     raise ValueError("Invalid clarification response")
+                explicit_table_request = (
+                    re.search(
+                        r"\b(frontend|front.end|ui|database|sql|backend)\b",
+                        question,
+                        flags=re.IGNORECASE,
+                    )
+                    and re.search(
+                        r"\btable\b",
+                        question,
+                        flags=re.IGNORECASE,
+                    )
+                )
 
+                if (
+                    explicit_table_request
+                    or "USER CLARIFICATION REPLY:" in question
+                ):
+                    decision["needs_clarification"] = False
                 if decision["needs_clarification"]:
                     clarification_question = decision["question"].strip()
                     if not clarification_question:
@@ -1422,12 +1430,33 @@ if st.button("Ask AI"):
     if not question.strip():
         st.warning("Please enter a question.")
     else:
+        pending_question = st.session_state.get(
+            "pending_clarification_question"
+        )
+
+        effective_question = question
+        if pending_question:
+            effective_question = (
+                "ORIGINAL REQUEST:\n"
+                + pending_question
+                + "\n\nUSER CLARIFICATION REPLY:\n"
+                + question
+                + "\n\nAnswer the original request using this reply. "
+                "If the reply clearly introduces a new request, "
+                "answer that new request instead. "
+                "Do not ask another clarification question."
+            )
+
         with st.spinner("AI is checking the Shipra code..."):
-            answer, sources = ask_shipra_ai(question)
+            answer, sources = ask_shipra_ai(effective_question)
+
         if answer.startswith("CLARIFICATION:"):
+            st.session_state["pending_clarification_question"] = question
             clarification = answer.split("CLARIFICATION:", 1)[1].strip()
             st.info(clarification)
             st.stop()
+
+        st.session_state.pop("pending_clarification_question", None)
         scenario_answer, code_answer = split_answer_sections(
             answer
         )
