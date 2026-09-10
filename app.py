@@ -44,6 +44,16 @@ def normalize_token(word):
         word = versioned_name.group(1)
 
     aliases = {
+        "label": "label",
+        "labels": "label",
+        "lables": "label",
+        "orders": "order",
+        "tables": "table",
+        "products": "product",
+        "carriers": "carrier",
+        "stores": "store",
+        "customers": "customer",
+        "reports": "report",
         "frontend": "frontend",
         "front": "frontend",
         "backend": "backend",
@@ -342,7 +352,54 @@ def search_documentation(question, top_k=15):
 
         if score > 0:
             scored.append((score, idx))
+    # Rank the requested topic before file popularity or API linking.
+    generic_words = {
+        "create", "connect", "update", "delete", "fetch", "validate",
+        "frontend", "backend", "flow", "code", "file", "function", "project",
+        "shipra", "explain", "guide", "using", "use", "can", "could", "would",
+        "please", "make", "build", "button", "actual", "happens", "mein",
+        "karna", "mujhy", "bta", "new", "give", "display", "existing",
+        "do", "an", "i",
+    }
+    topic_tokens = query_tokens - generic_words
+    topic_scores = {}
 
+    for idx, tokens in enumerate(document_tokens):
+        path = metadata[idx].get("file_path", "")
+        purpose = tokenize("/".join(path.split("/")[-2:]))
+        overlap = topic_tokens & tokens
+        purpose_overlap = topic_tokens & purpose
+        coverage = len(overlap) / max(1, len(topic_tokens))
+
+        specificity = sum(
+            math.log(
+                (len(chunks) + 1)
+                / (token_document_frequency.get(token, 0) + 1)
+            )
+            for token in overlap
+        )
+
+        score = (
+            2500 * coverage
+            + 400 * len(purpose_overlap)
+            + 20 * specificity
+        )
+
+        if "create" in query_tokens:
+            if "create" in purpose and purpose_overlap:
+                score += 400
+            if purpose & {"edit", "update", "delete"}:
+                score -= 800
+
+        if topic_tokens and not overlap:
+            score -= 5000
+
+        topic_scores[idx] = score
+
+    scored = [
+        (topic_scores[idx] + min(score, 600), idx)
+        for score, idx in scored
+    ]
     # Discover domain call names from the strongest matching frontend code.
     # Example: CreateSaleChannelConfig is then matched exactly across the
     # Axios helper, controller, command handler, repository, and entity.
@@ -365,7 +422,7 @@ def search_documentation(question, top_k=15):
         )
         for identifier in identifiers:
             identifier_tokens = tokenize(identifier)
-            if len(identifier_tokens.intersection(query_tokens)) >= 2:
+            if topic_tokens and topic_tokens.issubset(identifier_tokens):
                 link_identifiers.add(identifier)
 
         # Also follow action/API calls discovered in the active UI even when
@@ -376,8 +433,17 @@ def search_documentation(question, top_k=15):
             chunks[seed_idx],
         )
         for identifier in called_identifiers:
+            if (
+                "create" in query_tokens
+                and "create" not in tokenize(identifier)
+            ):
+                continue
             if identifier in linkable_identifiers:
-                if seed_position < 2:
+                if seed_position < 2 and (
+                    not topic_tokens
+                    or topic_tokens.issubset(tokenize(identifier))
+                    or asks_for_price_calculator
+                ):
                     discovered_action_identifiers.add(identifier)
 
     if discovered_action_identifiers:
@@ -405,7 +471,12 @@ def search_documentation(question, top_k=15):
                 ]
             )
             exact_links = sum(
-                identifier in searchable
+                bool(
+                    re.search(
+                        r"\b" + re.escape(identifier) + r"(?:Async)?\b",
+                        searchable,
+                    )
+                )
                 for identifier in link_identifiers
             )
             canonical_links = sum(
@@ -451,7 +522,9 @@ def search_documentation(question, top_k=15):
     if asks_for_flow and link_identifiers:
         stage_checks = [
             lambda project, path: (
-                project == "frontend" and "/src/components/" in path
+                 project == "frontend" and (
+                    "/src/components/" in path or "/src/pages/" in path
+                )
             ),
             lambda project, path: (
                 project == "frontend"
@@ -493,6 +566,21 @@ def search_documentation(question, top_k=15):
                 )
                 break
 
+    # Include the matching page even when its modal is already selected.
+    for _, idx in scored:
+        path = metadata[idx].get("file_path", "")
+        purpose = tokenize("/".join(path.split("/")[-2:]))
+
+        if (
+            topic_tokens
+            and topic_tokens.issubset(purpose)
+            and "/src/pages/" in path
+            and path not in anchors_per_file
+        ):
+            anchor_indices.append(idx)
+            anchors_per_file[path] += 1
+            break
+
     for _, idx in scored:
         file_path = metadata[idx].get("file_path", "")
         project = metadata[idx].get("project", "backend")
@@ -501,14 +589,12 @@ def search_documentation(question, top_k=15):
 
         if anchors_per_file[file_path] >= 1:
             continue
-        if asks_for_flow and category in used_categories:
-            continue
 
         anchor_indices.append(idx)
         anchors_per_file[file_path] += 1
         used_categories.add(category)
 
-        if len(anchor_indices) >= 6:
+        if len(anchor_indices) >= 8:
             break
 
     # Include every layer anchor first, then add neighboring chunks in rounds.
@@ -658,8 +744,11 @@ Lines: {result['start_line'] or '?'}-{result['end_line'] or '?'}
 Chunk ID: {result['chunk_id']}
 Exact-code placeholder: [[CODE_SOURCE_{number}]]
 
-Content:
+Displayed excerpt (explain this excerpt when using its code marker):
 {visible_content}
+
+Additional indexed context (for understanding the surrounding logic):
+{result["text"]}
 """
         )
 
