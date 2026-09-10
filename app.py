@@ -1098,6 +1098,7 @@ def get_display_labels(response_language):
 GENERAL = "general"
 PROJECT_EXISTING = "project_existing"
 PROJECT_CHANGE = "project_change"
+PROJECT_PROMPT = "project_prompt"
 
 
 def get_recent_history_text(limit=6):
@@ -1143,6 +1144,12 @@ project_existing
 project_change
 - Asking to add, create, implement, modify, replace, remove, or extend
   something in the Shipra project.
+project_prompt
+- User specifically asks to generate a coding prompt for the Shipra project.
+- Examples:
+  "is feature ka prompt generate karo"
+  "mujhe AI tool ke liye prompt bana do"
+  "duplicate order feature ka coding prompt do"
 
 Use conversation context to understand follow-up phrases such as
 "us mein", "uske baad", "ye add karo", or "is page par".
@@ -1153,6 +1160,7 @@ Return ONLY one of these exact labels:
 general
 project_existing
 project_change
+project_prompt
 
 Conversation:
 {history_text}
@@ -1175,7 +1183,7 @@ Latest question:
             )
             intent = (response.text or "").strip().lower()
 
-            if intent in {GENERAL, PROJECT_EXISTING, PROJECT_CHANGE}:
+            if intent in {GENERAL, PROJECT_EXISTING, PROJECT_CHANGE, PROJECT_PROMPT}:
                 return intent
         except Exception as error:
             print(f"Intent classification error with {model_name}: {error}")
@@ -1548,6 +1556,140 @@ Do not add headings, code, sources, or file paths.
     raise last_error
 
 
+def generate_project_prompt(question):
+    response_language = get_response_language(question)
+
+    results = search_documentation(
+        question,
+        top_k=6,
+    )
+
+    results = filter_relevant_results(
+        results,
+        question,
+    )
+
+    context = build_context(
+        results,
+        question,
+    )
+
+    generation_prompt = f"""
+You are generating a coding prompt for another AI developer.
+
+The coding task is for the Shipra project.
+
+Required language: {response_language}
+
+USER REQUEST:
+{question}
+
+VERIFIED PROJECT SOURCES:
+{context}
+
+Create a concise, implementation-ready coding prompt.
+
+Rules:
+
+1. Use only verified project facts from the supplied sources.
+
+2. Never invent:
+- file paths
+- functions
+- classes
+- APIs
+- database tables
+- routes
+- screens
+- components
+
+3. If the requested feature does not already exist,
+clearly describe it as a NEW or PROPOSED implementation.
+
+4. Existing Shipra code may be used as a reference pattern.
+
+5. Mention only the most relevant verified files/functions.
+
+6. Do not include source code.
+
+7. Do not include long explanations.
+
+8. The final prompt must contain:
+
+Goal
+
+Verified Project References
+
+Implementation Requirements
+
+Constraints
+
+Integration Requirements
+
+Testing Requirements
+
+9. If an exact implementation is not found,
+say:
+
+"No verified existing implementation for this feature
+was found in the retrieved project sources."
+
+Then explain which verified existing project pattern
+should be used as a reference.
+
+Return ONLY the final coding prompt.
+"""
+
+    response = client.models.generate_content(
+        model="gemini-3.6-flash",
+        contents=generation_prompt,
+    )
+
+    generated_prompt = (response.text or "").strip()
+
+    # Second validation pass
+    validation_prompt = f"""
+Validate this Shipra coding prompt.
+
+VERIFIED SOURCES:
+{context}
+
+PROMPT TO VALIDATE:
+{generated_prompt}
+
+Rules:
+
+- Every existing Shipra file path must be supported by the sources.
+- Every existing function/class/API must be supported by the sources.
+- Remove unsupported project claims.
+- Do not invent architecture.
+- New functionality must be labelled as proposed/new.
+- Keep the prompt concise.
+- Preserve the user's requested feature.
+
+Return ONLY the corrected final prompt.
+"""
+
+    validation_response = client.models.generate_content(
+        model="gemini-3.6-flash",
+        contents=validation_prompt,
+    )
+
+    final_prompt = (
+        validation_response.text
+        or generated_prompt
+    ).strip()
+
+    answer = (
+        "### Practical Scenario Guide\n"
+        "Ye verified Shipra project references ki base par "
+        "coding prompt generate kiya gaya hai.\n\n"
+        "### Actual Project Code Flow\n"
+        f"{final_prompt}"
+    )
+
+    return answer, results
+
 
 def ask_shipra_ai(question):
     intent = classify_question(question)
@@ -1555,7 +1697,13 @@ def ask_shipra_ai(question):
     if intent == GENERAL:
         return ask_general_ai(question)
 
-    return ask_shipra_project_ai(question, intent)
+    if intent == PROJECT_PROMPT:
+        return generate_project_prompt(question)
+
+    return ask_shipra_project_ai(
+        question,
+        intent,
+    )
 
 if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = []
