@@ -1023,6 +1023,20 @@ REQUIRED OUTPUT LANGUAGE FOR THIS ANSWER: {response_language}
 This language is selected by the application from the user's question and any
 explicit language request. Write all user-facing prose only in this language.
 Do not override it based on project file names, code, or previous answers.
+CLARIFICATION RULE — OVERRIDES THE NORMAL ANSWER FORMAT
+If the user's request has multiple materially different meanings and
+the supplied conversation does not resolve them, ask ONE short clarification
+question in the required output language before giving instructions.
+
+Start this response with exactly: CLARIFICATION:
+Do not include scenario headings, code, sources, or implementation steps.
+
+Example: "How to create a table?" does not specify a frontend table
+or a database table. Ask which one the user means.
+Do not infer intent merely because a retrieved file contains a matching word.
+Table configuration is not evidence of table creation.
+Do not ask again when the user has already clearly specified their intent.
+Do not invent screens, permissions, buttons, or workflows.
 
 NON-NEGOTIABLE EVIDENCE RULES
 1. Treat the supplied sources as the only evidence about existing Shipra code.
@@ -1242,7 +1256,10 @@ USER QUESTION
                 )
                 elapsed = time.time() - start
                 print(f"Gemini response time: {elapsed:.2f} seconds")
-                answer_text = response.text
+                answer_text = (response.text or "").strip()
+
+                if answer_text.startswith("CLARIFICATION:"):
+                    return answer_text, []
 
                 if needs_language_retry(
                     answer_text,
@@ -1345,7 +1362,10 @@ if st.button("Ask AI"):
     else:
         with st.spinner("AI is checking the Shipra code..."):
             answer, sources = ask_shipra_ai(question)
-
+        if answer.startswith("CLARIFICATION:"):
+            clarification = answer.split("CLARIFICATION:", 1)[1].strip()
+            st.info(clarification)
+            st.stop()
         scenario_answer, code_answer = split_answer_sections(
             answer
         )
