@@ -1328,6 +1328,8 @@ Do not add headings, code, sources, or file paths.
 
     raise last_error
 
+if "chat_history" not in st.session_state:
+    st.session_state["chat_history"] = []
 
 question = st.text_input(
     "Ask your question:",
