@@ -846,7 +846,7 @@ def snippet_anchor_candidates(result):
     return [candidate for candidate in candidates if candidate]
 
 
-def extract_exact_snippet(result, question, maximum_lines=20):
+def extract_exact_snippet(result, question, maximum_lines=60):
     """Select a useful contiguous excerpt without asking the model to copy it."""
     lines = result["text"].splitlines()
     if not lines:
@@ -1093,25 +1093,354 @@ def get_display_labels(response_language):
         "no_code": "A verified code flow is not available for this question.",
     }
 
+GENERAL = "general"
+PROJECT_EXISTING = "project_existing"
+PROJECT_CHANGE = "project_change"
 
-def ask_shipra_ai(question):
+
+def get_recent_history_text(limit=6):
+    history = st.session_state.get("chat_history", [])[-limit:]
+    lines = []
+
+    for item in history:
+        role = item.get("role", "user")
+        content = str(item.get("content", "")).strip()
+
+        # Prompt unnecessarily huge na ho.
+        if len(content) > 1200:
+            content = content[:1200] + "..."
+
+        lines.append(f"{role.upper()}: {content}")
+
+    return "\n".join(lines)
+
+
+def get_previous_user_question():
+    history = st.session_state.get("chat_history", [])
+
+    for item in reversed(history):
+        if item.get("role") == "user":
+            return str(item.get("content", "")).strip()
+
+    return ""
+
+
+def classify_question(question):
+    history_text = get_recent_history_text(limit=4)
+
+    prompt = f"""
+Classify the latest user question into exactly ONE label:
+
+general
+- General knowledge or programming question.
+- Not specifically asking about the Shipra project.
+
+project_existing
+- Asking how an existing Shipra feature, screen, file, function, API,
+  frontend flow, backend flow, controller, handler, repository, or entity works.
+
+project_change
+- Asking to add, create, implement, modify, replace, remove, or extend
+  something in the Shipra project.
+
+Use conversation context to understand follow-up phrases such as
+"us mein", "uske baad", "ye add karo", or "is page par".
+
+A generic programming question such as
+"React mein API kaise call karte hain?"
+is general unless the latest question or conversation clearly
+connects it to Shipra.
+
+Return ONLY one of these exact labels:
+general
+project_existing
+project_change
+
+Conversation:
+{history_text}
+
+Latest question:
+{question}
+"""
+
+    models_to_try = [
+        "gemini-3.5-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.7-flash",
+    ]
+
+    for model_name in models_to_try:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+            )
+
+            intent = (response.text or "").strip().lower()
+
+            if intent in {
+                GENERAL,
+                PROJECT_EXISTING,
+                PROJECT_CHANGE,
+            }:
+                return intent
+
+        except Exception as error:
+            print(
+                f"Intent classification error with "
+                f"{model_name}: {error}"
+            )
+
+    # Agar classifier API fail ho jaye to fallback.
+    combined = f"{history_text}\n{question}".lower()
+
+    change_words = {
+        "create",
+        "update",
+        "delete",
+        "change",
+        "modify",
+        "replace",
+    }
+
+    question_tokens = tokenize(question)
+
+    project_hint = any(
+        word in combined
+        for word in (
+            "shipra",
+            "frontend",
+            "backend",
+            "controller",
+            "repository",
+            "handler",
+            "axiosinterceptors",
+            "sale channel",
+            "project",
+        )
+    )
+
+    if project_hint and question_tokens.intersection(change_words):
+        return PROJECT_CHANGE
+
+    if project_hint:
+        return PROJECT_EXISTING
+
+    return GENERAL
+
+
+def filter_relevant_results(results, question):
+    """
+    Weak / unrelated semantic results ko Gemini tak
+    pohanchne se pehle remove karta hai.
+    """
+
+    generic_tokens = {
+        "create",
+        "connect",
+        "update",
+        "delete",
+        "fetch",
+        "validate",
+        "frontend",
+        "backend",
+        "flow",
+        "code",
+        "file",
+        "function",
+        "project",
+        "shipra",
+        "explain",
+        "guide",
+        "using",
+        "use",
+        "button",
+        "actual",
+        "existing",
+        "new",
+        "add",
+        "implement",
+    }
+
+    topic_tokens = tokenize(question) - generic_tokens
+
+    if not topic_tokens:
+        return results[:8]
+
+    filtered = []
+
+    for result in results:
+        searchable = " ".join(
+            [
+                result.get("file_path", ""),
+                result.get("section", ""),
+                result.get("symbol") or "",
+                result.get("text", ""),
+            ]
+        )
+
+        source_tokens = tokenize(searchable)
+
+        overlap = topic_tokens.intersection(source_tokens)
+
+        coverage = (
+            len(overlap)
+            / max(1, len(topic_tokens))
+        )
+
+        if (
+            result.get("matched_identifiers")
+            or len(overlap) >= 2
+            or coverage >= 0.34
+        ):
+            filtered.append(result)
+
+    return filtered[:12]
+
+
+def ask_general_ai(question):
+    response_language = get_response_language(question)
+
+    conversation_text = get_recent_history_text()
+
+    prompt = f"""
+You are a helpful general AI assistant.
+
+Required output language: {response_language}.
+
+Answer the latest question accurately and directly.
+
+Use numbered, step-by-step guidance whenever instructions
+or a process are useful.
+
+For conceptual questions:
+- explain simply first
+- then give practical understanding
+- give examples when useful
+
+Do not mention Shipra, Shipra project files,
+Shipra APIs, or Shipra code unless the user
+explicitly asks about them.
+
+Do not include Markdown headings named
+Practical Scenario Guide or Actual Project Code Flow.
+
+Do not invent facts.
+
+Conversation context:
+{conversation_text}
+
+Latest question:
+{question}
+"""
+
+    models_to_try = [
+        "gemini-3.5-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.7-flash",
+    ]
+
+    last_error = None
+
+    for model_name in models_to_try:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+            )
+
+            guide = (response.text or "").strip()
+
+            if response_language == "Roman Urdu":
+                code_note = (
+                    "Ye general sawal hai, is liye Shipra "
+                    "project ka verified code is answer ke "
+                    "liye apply nahi hota."
+                )
+            else:
+                code_note = (
+                    "This is a general question, so verified "
+                    "Shipra project code is not applicable "
+                    "to this answer."
+                )
+
+            answer = (
+                "### Practical Scenario Guide\n"
+                f"{guide}\n\n"
+                "### Actual Project Code Flow\n"
+                f"{code_note}"
+            )
+
+            return answer, []
+
+        except Exception as error:
+            last_error = error
+
+            print(
+                f"General AI error with "
+                f"{model_name}: {error}"
+            )
+
+    raise last_error
+
+def ask_shipra_project_ai(question, intent):
     response_language = get_response_language(question)
     code_explanation_heading = (
         "**What this code does:**"
         if response_language == "English"
         else "**Is code mein kya ho raha hai:**"
     )
-    results = search_documentation(question, top_k=15)
-    context = build_context(results, question)
-    code_cards = build_code_cards(results, question)
+    conversation_text = get_recent_history_text()
+
+previous_user_question = get_previous_user_question()
+
+search_question = (
+    f"{previous_user_question}\nFollow-up: {question}"
+    if previous_user_question
+    else question
+)
+
+results = search_documentation(
+    search_question,
+    top_k=15,
+)
+
+results = filter_relevant_results(
+    results,
+    search_question,
+)
+
+context = build_context(
+    results,
+    search_question,
+)
+
+code_cards = build_code_cards(
+    results,
+    search_question,
+)
     # Never append unexplained fallback snippets. The model places a small
     # number of verified code markers inside already-explained steps.
     minimum_code_cards = 0
 
     prompt = f"""
 You are the Shipra project assistant.
+
 Required output language: {response_language}.
-Write explanations in that language; preserve technical identifiers.
+Detected request type: {intent}.
+
+Write explanations in that language;
+preserve technical identifiers.
+
+Conversation context (may be empty):
+{conversation_text}
+
+If request type is project_change,
+do not claim the requested new feature already exists
+merely because similar project code was retrieved.
+
+Existing code is only a reference unless it directly
+implements the requested feature.
 
 Answer directly. Do not output CLARIFICATION or ask the user to choose
 components or implementation details. State a reasonable assumption if needed.
@@ -1295,6 +1624,16 @@ Do not add headings, code, sources, or file paths.
 
     raise last_error
 
+def ask_shipra_ai(question):
+    intent = classify_question(question)
+
+    if intent == GENERAL:
+        return ask_general_ai(question)
+
+    return ask_shipra_project_ai(
+        question,
+        intent,
+    )
 if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = []
 
@@ -1312,11 +1651,31 @@ if st.button("Ask AI"):
     else:
         st.session_state.pop("pending_clarification_question", None)
 
-        with st.spinner("AI is checking the Shipra code..."):
-            answer, sources = ask_shipra_ai(question)
-        scenario_answer, code_answer = split_answer_sections(
-            answer
-        )
+with st.spinner("AI is preparing your answer..."):
+    answer, sources = ask_shipra_ai(question)
+
+st.session_state["chat_history"].append(
+    {
+        "role": "user",
+        "content": question,
+    }
+)
+
+st.session_state["chat_history"].append(
+    {
+        "role": "assistant",
+        "content": answer,
+    }
+)
+
+# Sirf recent conversation rakho.
+st.session_state["chat_history"] = (
+    st.session_state["chat_history"][-12:]
+)
+
+scenario_answer, code_answer = split_answer_sections(
+    answer
+)
         display_labels = get_display_labels(
             get_response_language(question)
         )
@@ -1354,28 +1713,33 @@ if st.button("Ask AI"):
             )
 
         with code_column:
-            st.markdown(f"#### {display_labels['code']}")
+if sources:
+    st.markdown(
+        f"### {display_labels['sources']}"
+    )
 
-            if code_answer:
-                st.markdown(code_answer)
-            else:
-                st.info(display_labels["no_code"])
+    for number, source in enumerate(
+        sources,
+        start=1,
+    ):
+        details = []
 
-        st.markdown(f"### {display_labels['sources']}")
-
-        for number, source in enumerate(sources, start=1):
-            details = []
-
-            if source.get("start_line") and source.get("end_line"):
-                details.append(
-                    f"lines {source['start_line']}-"
-                    f"{source['end_line']}"
-                )
-
-            details.append(f"Chunk ID: {source['chunk_id']}")
-
-            st.write(
-                f"{number}. [{source['project'].upper()}] "
-                f"{source['file_path']} "
-                f"({', '.join(details)})"
+        if (
+            source.get("start_line")
+            and source.get("end_line")
+        ):
+            details.append(
+                f"lines {source['start_line']}-"
+                f"{source['end_line']}"
             )
+
+        details.append(
+            f"Chunk ID: {source['chunk_id']}"
+        )
+
+        st.write(
+            f"{number}. "
+            f"[{source['project'].upper()}] "
+            f"{source['file_path']} "
+            f"({', '.join(details)})"
+        )
