@@ -188,7 +188,7 @@ def load_data():
 ) = load_data()
 
 
-def search_documentation(question, top_k=15):
+def search_documentation(question, top_k=8):
     query_tokens = tokenize(question)
     query_code_names = set(
         re.findall(
@@ -846,7 +846,7 @@ def snippet_anchor_candidates(result):
     return [candidate for candidate in candidates if candidate]
 
 
-def extract_exact_snippet(result, question, maximum_lines=60):
+def extract_exact_snippet(result, question, maximum_lines=12):
     """Select a useful contiguous excerpt without asking the model to copy it."""
     lines = result["text"].splitlines()
     if not lines:
@@ -1360,13 +1360,26 @@ Use exactly these two top-level headings in this order:
 ### Practical Scenario Guide
 ### Actual Project Code Flow
 
-In the scenario guide, give practical numbered steps and expected results.
+In the scenario guide:
+- Give maximum 6 short numbered steps.
+- NEVER put code in the scenario guide.
+- NEVER put Function/Class labels in the scenario guide.
+- Mention at most one short "Reference: <file path>" per relevant step.
+- Keep each step concise and user-focused.
+- End with one short Expected Result.
+- Do not explain implementation details here.
+
 For a new feature, describe development/setup steps as proposed actions.
 Never invent an existing menu, screen, permission, button, or API.
 
 In the code-flow section, explain relevant existing code first.
 Use [[CODE_SOURCE_N]] markers for existing source snippets; do not reproduce
-existing code manually. Put each marker on its own line.
+existing code manually.
+Show only the 1-2 most relevant existing code snippets.
+Do not show multiple versions of the same operation.
+Prefer the exact function that performs the requested action.
+Keep code snippets short; surrounding unrelated code is not needed.
+Put each marker on its own line.
 Immediately explain the displayed snippet under {code_explanation_heading}.
 Describe only operations visible in that snippet. Follow exact calls across
 layers; never join unrelated frontend and backend flows.
@@ -1403,16 +1416,28 @@ USER QUESTION:
 {question}
 """
 
-    scenario_prompt = f"""
-Write a practical step-by-step guide in {response_language}.
-Answer directly, with a stated assumption if needed; do not ask clarification.
-Use sources for existing project facts. If the implementation is not found
-in the available sources, explain that limit and give clearly proposed steps
-using general programming knowledge. Do not invent existing screens or APIs.
-For a bare table-creation request, assume a frontend display table.
-Do not include code, headings, source numbers, or file paths.
+scenario_prompt = f"""
+Write a short practical step-by-step guide in {response_language}.
+
+Rules:
+- Maximum 6 steps.
+- Each step must be 1-2 short sentences.
+- NEVER include code.
+- NEVER include fenced code blocks.
+- NEVER include Function/Class labels.
+- You MAY mention only a short file reference when useful, like:
+  Reference: Shipra.Frontend/src/pages/orders/createRegularOrder/index.js
+- Do not explain source code here.
+- Do not dump file contents.
+- Focus only on what the user should do.
+- End with one short Expected Result line.
+
+Use project sources only to make the steps accurate.
+If something is not verified in the sources, clearly say so.
+
 Sources:
 {context}
+
 Question:
 {question}
 """
