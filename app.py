@@ -1416,7 +1416,7 @@ USER QUESTION:
 {question}
 """
 
-scenario_prompt = f"""
+    scenario_prompt = f"""
 Write a short practical step-by-step guide in {response_language}.
 
 Rules:
