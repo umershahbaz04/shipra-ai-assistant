@@ -1641,7 +1641,6 @@ Return ONLY the coding prompt.
 
     generated_prompt = (response.text or "").strip()
 
-    # Second validation pass
     validation_prompt = f"""
 Validate this Shipra coding prompt.
 
@@ -1652,13 +1651,6 @@ PROMPT TO VALIDATE:
 {generated_prompt}
 
 Rules:
-
-- Final prompt must remain under 350 words.
-- Do not add new requirements unless necessary for accuracy.
-- Remove duplicate or irrelevant references.
-- Maximum 3 existing project references.
-- Never output [[CODE_SOURCE_N]] placeholders.
-- Keep requirements concise.
 - Every existing Shipra file path must be supported by the sources.
 - Every existing function/class/API must be supported by the sources.
 - Remove unsupported project claims.
@@ -1666,6 +1658,11 @@ Rules:
 - New functionality must be labelled as proposed/new.
 - Keep the prompt concise.
 - Preserve the user's requested feature.
+- Final prompt must remain under 350 words.
+- Do not add new requirements unless necessary for accuracy.
+- Remove duplicate or irrelevant references.
+- Maximum 3 existing project references.
+- Never output [[CODE_SOURCE_N]] placeholders.
 
 Return ONLY the corrected final prompt.
 """
