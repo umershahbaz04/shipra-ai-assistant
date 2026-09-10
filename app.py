@@ -1569,11 +1569,11 @@ def generate_project_prompt(question):
         question,
     )
 
-context_parts = []
+    context_parts = []
 
-for number, result in enumerate(results[:4], start=1):
-    context_parts.append(
-        f"""
+    for number, result in enumerate(results[:4], start=1):
+        context_parts.append(
+            f"""
 SOURCE {number}
 File: {result['file_path']}
 Function/Class: {result.get('symbol') or 'not detected'}
@@ -1581,11 +1581,11 @@ Project: {result['project']}
 Relevant code/context:
 {result['text'][:1800]}
 """
-    )
+        )
 
-context = "\n".join(context_parts)
+    context = "\n".join(context_parts)
 
-generation_prompt = f"""
+    generation_prompt = f"""
 You generate concise coding prompts for developers working
 on the Shipra project.
 
@@ -1607,7 +1607,7 @@ STRICT RULES:
 - Do NOT mention chunk IDs or source numbers.
 - Mention maximum 3 relevant existing files/functions.
 - Prefer CREATE files when the user asks how to create/place something.
-- Do not include edit or draft implementations unless they are essential.
+- Do not include edit or draft implementations unless essential.
 - Never invent a Shipra file, API, component, route, function, or behavior.
 - Only describe facts supported by VERIFIED PROJECT SOURCES.
 - If something is new, label it as proposed.
@@ -1627,9 +1627,8 @@ Important Constraints
 
 Verification
 
-The Requirements section should normally contain only 4-7 concise items.
-
-The Verification section should contain only 2-4 checks.
+The Requirements section should contain 4-7 concise items.
+The Verification section should contain 2-4 checks.
 
 Return ONLY the coding prompt.
 """
@@ -1656,10 +1655,9 @@ Rules:
 - Remove unsupported project claims.
 - Do not invent architecture.
 - New functionality must be labelled as proposed/new.
-- Keep the prompt concise.
 - Preserve the user's requested feature.
 - Final prompt must remain under 350 words.
-- Do not add new requirements unless necessary for accuracy.
+- Do not add unnecessary requirements.
 - Remove duplicate or irrelevant references.
 - Maximum 3 existing project references.
 - Never output [[CODE_SOURCE_N]] placeholders.
