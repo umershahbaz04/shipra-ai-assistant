@@ -1675,13 +1675,24 @@ Return ONLY the corrected final prompt.
         or generated_prompt
     ).strip()
 
-    answer = (
-        "### Practical Scenario Guide\n"
-        "Ye verified Shipra project references ki base par "
-        "coding prompt generate kiya gaya hai.\n\n"
-        "### Actual Project Code Flow\n"
-        f"{final_prompt}"
+if response_language == "Roman Urdu":
+    guide_text = (
+        "Neeche ready-to-use coding prompt diya gaya hai. "
+        "Isay copy karke apne AI coding tool mein paste karein."
     )
+else:
+    guide_text = (
+        "A ready-to-use coding prompt is provided below. "
+        "Copy it and paste it into your AI coding tool."
+    )
+
+answer = (
+    "### Practical Scenario Guide\n"
+    f"{guide_text}\n\n"
+    "### Actual Project Code Flow\n"
+    "### Generated Prompt\n\n"
+    f"```text\n{final_prompt}\n```"
+)
 
     return answer, results
 
