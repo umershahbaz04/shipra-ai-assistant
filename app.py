@@ -2540,6 +2540,76 @@ def get_previous_user_question():
 
 
 def classify_question(question):
+    lowered_question = question.lower().strip()
+
+    shipra_feature_terms = {
+        "dashboard",
+        "dashboards",
+        "order",
+        "orders",
+        "return order",
+        "store",
+        "stores",
+        "store channel",
+        "sale channel",
+        "carrier",
+        "carriers",
+        "shipment",
+        "shipments",
+        "tracking",
+        "inventory",
+        "product",
+        "products",
+        "lead",
+        "leads",
+        "station",
+        "label",
+        "labels",
+        "cod",
+        "price calculator",
+    }
+
+    project_action_words = {
+        "create",
+        "add",
+        "make",
+        "open",
+        "use",
+        "assign",
+        "update",
+        "edit",
+        "delete",
+        "remove",
+        "filter",
+        "search",
+        "export",
+        "import",
+        "upload",
+        "sync",
+        "connect",
+        "return",
+        "track",
+        "how",
+        "kesy",
+        "kaise",
+    }
+
+    has_feature = any(
+        term in lowered_question
+        for term in shipra_feature_terms
+    )
+
+    has_project_action = any(
+        word in lowered_question
+        for word in project_action_words
+    )
+
+    if has_feature and has_project_action:
+        return PROJECT_EXISTING
+
+    # existing logic continues below...
+
+    # existing classify_question code continues below...
     # Exact mock/test order identifiers and direct order-data lookups belong to
     # the Shipra project pipeline even in a fresh chat.
     if re.search(r"\bORD-\d+\b", question, flags=re.IGNORECASE):
