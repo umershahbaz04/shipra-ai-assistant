@@ -171,8 +171,8 @@ st.markdown(
     <style>
     [data-testid="stSidebar"] {
         background:
-            radial-gradient(circle at 18% 0%, rgba(59, 130, 246, 0.13), transparent 24%),
-            linear-gradient(180deg, #0f172a 0%, #111827 55%, #0b1220 100%);
+            radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.04), transparent 24%),
+            linear-gradient(180deg, #111111 0%, #161616 55%, #0b0b0b 100%);
         border-right: 1px solid rgba(148, 163, 184, 0.14);
     }
 
@@ -194,8 +194,8 @@ st.markdown(
         border-radius: 0.7rem;
         display: grid;
         place-items: center;
-        background: linear-gradient(135deg, #2563eb, #4f46e5);
-        box-shadow: 0 8px 24px rgba(37, 99, 235, 0.28);
+        background: linear-gradient(135deg, #2a2a2a, #111111);
+        box-shadow: 0 8px 24px rgba(255, 255, 255, 0.08);
         font-size: 1.05rem;
         flex: 0 0 auto;
     }
@@ -253,10 +253,10 @@ st.markdown(
     }
 
     [data-testid="stSidebar"] .stButton > button[kind="primary"] {
-        background: rgba(37, 99, 235, 0.18);
-        border-color: rgba(96, 165, 250, 0.24);
-        color: #eff6ff;
-        box-shadow: inset 3px 0 0 #3b82f6;
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.14);
+        color: #f5f5f5;
+        box-shadow: inset 3px 0 0 #d4d4d4;
     }
 
     [data-testid="stSidebar"] div[data-testid="stPopover"] button {
@@ -288,6 +288,166 @@ st.markdown(
     [data-testid="stSidebar"] label {
         color: inherit;
     }
+    /* ---------------- Main app grayscale theme ---------------- */
+    html, body, [data-testid="stAppViewContainer"] {
+        background: #0b0b0b;
+        color: #f2f2f2;
+    }
+
+    [data-testid="stHeader"] {
+        background: rgba(11, 11, 11, 0.92);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    [data-testid="stAppViewBlockContainer"] {
+        max-width: 980px;
+        padding-top: 2.25rem;
+        padding-bottom: 7rem;
+    }
+
+    .shipra-main-hero {
+        margin: 2.1rem 0 2.0rem 0;
+        padding: 2.2rem 2.2rem 2rem 2.2rem;
+        border-radius: 1.25rem;
+        background:
+            linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.015)),
+            #111111;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+    }
+
+    .shipra-main-eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        color: #a3a3a3;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.11em;
+        text-transform: uppercase;
+        margin-bottom: 0.9rem;
+    }
+
+    .shipra-main-title {
+        margin: 0;
+        color: #fafafa;
+        font-size: clamp(2rem, 5vw, 3.35rem);
+        line-height: 1.02;
+        font-weight: 760;
+        letter-spacing: -0.045em;
+    }
+
+    .shipra-main-subtitle {
+        color: #a3a3a3;
+        font-size: 1rem;
+        line-height: 1.65;
+        margin-top: 0.95rem;
+        max-width: 720px;
+    }
+
+    .shipra-feature-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.85rem;
+        margin-top: 1.5rem;
+    }
+
+    .shipra-feature-card {
+        background: #141414;
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 0.9rem;
+        padding: 1rem 1.05rem;
+        min-height: 88px;
+    }
+
+    .shipra-feature-title {
+        color: #e5e5e5;
+        font-size: 0.88rem;
+        font-weight: 650;
+        margin-bottom: 0.3rem;
+    }
+
+    .shipra-feature-copy {
+        color: #8d8d8d;
+        font-size: 0.78rem;
+        line-height: 1.45;
+    }
+
+    /* Chat messages */
+    [data-testid="stChatMessage"] {
+        background: transparent;
+        border: none;
+    }
+
+    [data-testid="stChatMessage"] > div {
+        border-radius: 1rem;
+    }
+
+    /* Chat input */
+    [data-testid="stChatInput"] {
+        background: #171717;
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        border-radius: 1rem;
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+    }
+
+    [data-testid="stChatInput"] textarea {
+        color: #f5f5f5 !important;
+        caret-color: #f5f5f5;
+    }
+
+    [data-testid="stChatInput"] textarea::placeholder {
+        color: #777777 !important;
+    }
+
+    [data-testid="stChatInput"] button {
+        background: #2b2b2b !important;
+        border-radius: 0.75rem !important;
+        color: #f3f3f3 !important;
+    }
+
+    [data-testid="stChatInput"] button:hover {
+        background: #3a3a3a !important;
+    }
+
+    /* Generic buttons in main area */
+    [data-testid="stMain"] .stButton > button {
+        background: #171717;
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        color: #e7e7e7;
+        border-radius: 0.75rem;
+    }
+
+    [data-testid="stMain"] .stButton > button:hover {
+        background: #222222;
+        border-color: rgba(255, 255, 255, 0.14);
+        color: #ffffff;
+    }
+
+    /* Markdown/code surfaces */
+    [data-testid="stMain"] pre {
+        background: #111111 !important;
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 0.85rem;
+    }
+
+    [data-testid="stMain"] code {
+        color: #dedede;
+    }
+
+    [data-testid="stMain"] hr {
+        border-color: rgba(255, 255, 255, 0.08);
+    }
+
+    @media (max-width: 780px) {
+        .shipra-feature-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .shipra-main-hero {
+            padding: 1.45rem;
+        }
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -306,8 +466,47 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("🤖 Shipra Full-Stack AI Assistant")
-st.write("Ask naturally about the Shipra frontend or backend project.")
+st.markdown(
+    """
+    <section class="shipra-main-hero">
+        <div class="shipra-main-eyebrow">● Shipra Developer Intelligence</div>
+        <h1 class="shipra-main-title">Shipra Full-Stack AI Assistant</h1>
+        <div class="shipra-main-subtitle">
+            Explore existing Shipra features, trace frontend-to-backend flows,
+            inspect APIs and handlers, and understand project behavior from
+            verified source evidence.
+        </div>
+
+        <div class="shipra-feature-grid">
+            <div class="shipra-feature-card">
+                <div class="shipra-feature-title">Trace application flows</div>
+                <div class="shipra-feature-copy">
+                    Follow active pages, API calls, controllers, handlers and repositories.
+                </div>
+            </div>
+            <div class="shipra-feature-card">
+                <div class="shipra-feature-title">Explain existing features</div>
+                <div class="shipra-feature-copy">
+                    Understand how current Shipra screens and workflows behave.
+                </div>
+            </div>
+            <div class="shipra-feature-card">
+                <div class="shipra-feature-title">Inspect validations</div>
+                <div class="shipra-feature-copy">
+                    Check frontend validation, backend rules and verified failure paths.
+                </div>
+            </div>
+            <div class="shipra-feature-card">
+                <div class="shipra-feature-title">Research project code</div>
+                <div class="shipra-feature-copy">
+                    Find symbols, references, routes, controllers and exact functions.
+                </div>
+            </div>
+        </div>
+    </section>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
