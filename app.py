@@ -5,7 +5,6 @@ import math
 import re
 import time
 import asyncio
-import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,56 +15,40 @@ import faiss
 import streamlit as st
 from google import genai
 from sentence_transformers import SentenceTransformer
+from supabase import create_client, Client as SupabaseClient
 
 
 
 # ---------------------------------------------------------------------------
-# Persistent chat history (SQLite)
+# Persistent chat history (Supabase)
 # ---------------------------------------------------------------------------
-# NOTE: SQLite persists on a normal/local server disk. On ephemeral cloud
-# hosts, use an external DB (Postgres/Supabase) for persistence across redeploys.
-CHAT_DB_PATH = Path(__file__).resolve().with_name("shipra_chat_history.db")
+# Required Streamlit Secrets:
+# SUPABASE_URL = "https://YOUR_PROJECT.supabase.co"
+# SUPABASE_KEY = "YOUR_SERVER_SIDE_SECRET_KEY"
+
+_supabase_client = None
 
 
-def _chat_db():
-    connection = sqlite3.connect(CHAT_DB_PATH)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    return connection
+def _chat_db() -> SupabaseClient:
+    """Return one lazily-created Supabase client for chat-history storage."""
+    global _supabase_client
 
+    if _supabase_client is None:
+        supabase_url = str(st.secrets["SUPABASE_URL"]).strip()
+        supabase_key = str(st.secrets["SUPABASE_KEY"]).strip()
 
-def init_chat_db():
-    with _chat_db() as db:
-        db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS conversations (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+        if not supabase_url or not supabase_key:
+            raise RuntimeError(
+                "SUPABASE_URL and SUPABASE_KEY must be configured "
+                "in Streamlit Secrets."
             )
-            """
+
+        _supabase_client = create_client(
+            supabase_url,
+            supabase_key,
         )
-        db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                conversation_id TEXT NOT NULL,
-                role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
-                content TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY(conversation_id)
-                    REFERENCES conversations(id)
-                    ON DELETE CASCADE
-            )
-            """
-        )
-        db.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_messages_conversation
-            ON messages(conversation_id, id)
-            """
-        )
+
+    return _supabase_client
 
 
 def utc_now_text():
@@ -75,94 +58,103 @@ def utc_now_text():
 def create_conversation(title="New chat"):
     conversation_id = uuid.uuid4().hex
     now = utc_now_text()
-    with _chat_db() as db:
-        db.execute(
-            """
-            INSERT INTO conversations(id, title, created_at, updated_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (conversation_id, title, now, now),
-        )
+
+    (
+        _chat_db()
+        .table("conversations")
+        .insert({
+            "id": conversation_id,
+            "title": title,
+            "created_at": now,
+            "updated_at": now,
+        })
+        .execute()
+    )
+
     return conversation_id
 
 
 def list_conversations(limit=40):
-    with _chat_db() as db:
-        return db.execute(
-            """
-            SELECT id, title, created_at, updated_at
-            FROM conversations
-            ORDER BY updated_at DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+    response = (
+        _chat_db()
+        .table("conversations")
+        .select("id,title,created_at,updated_at")
+        .order("updated_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+
+    return response.data or []
 
 
 def load_conversation(conversation_id):
-    with _chat_db() as db:
-        rows = db.execute(
-            """
-            SELECT role, content, created_at
-            FROM messages
-            WHERE conversation_id = ?
-            ORDER BY id ASC
-            """,
-            (conversation_id,),
-        ).fetchall()
-    return [
-        {
-            "role": row["role"],
-            "content": row["content"],
-            "created_at": row["created_at"],
-        }
-        for row in rows
-    ]
+    response = (
+        _chat_db()
+        .table("messages")
+        .select("role,content,created_at")
+        .eq("conversation_id", conversation_id)
+        .order("id", desc=False)
+        .execute()
+    )
+
+    return response.data or []
 
 
 def save_message(conversation_id, role, content):
     now = utc_now_text()
-    with _chat_db() as db:
-        db.execute(
-            """
-            INSERT INTO messages(conversation_id, role, content, created_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (conversation_id, role, content, now),
-        )
-        db.execute(
-            """
-            UPDATE conversations
-            SET updated_at = ?
-            WHERE id = ?
-            """,
-            (now, conversation_id),
-        )
+
+    (
+        _chat_db()
+        .table("messages")
+        .insert({
+            "conversation_id": conversation_id,
+            "role": role,
+            "content": content,
+            "created_at": now,
+        })
+        .execute()
+    )
+
+    (
+        _chat_db()
+        .table("conversations")
+        .update({
+            "updated_at": now,
+        })
+        .eq("id", conversation_id)
+        .execute()
+    )
 
 
 def set_conversation_title(conversation_id, first_question):
     title = re.sub(r"\s+", " ", first_question).strip()
+
     if len(title) > 48:
         title = title[:45].rstrip() + "..."
+
     if not title:
         title = "New chat"
 
-    with _chat_db() as db:
-        db.execute(
-            "UPDATE conversations SET title = ? WHERE id = ?",
-            (title, conversation_id),
-        )
+    (
+        _chat_db()
+        .table("conversations")
+        .update({
+            "title": title,
+        })
+        .eq("id", conversation_id)
+        .execute()
+    )
 
 
 def delete_conversation(conversation_id):
-    with _chat_db() as db:
-        db.execute(
-            "DELETE FROM conversations WHERE id = ?",
-            (conversation_id,),
-        )
+    (
+        _chat_db()
+        .table("conversations")
+        .delete()
+        .eq("id", conversation_id)
+        .execute()
+    )
 
-
-init_chat_db()
 
 st.set_page_config(
     page_title="Shipra AI Assistant",
