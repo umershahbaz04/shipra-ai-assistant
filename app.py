@@ -2539,81 +2539,150 @@ def get_previous_user_question():
     return ""
 
 
+def detect_request_profile(question):
+    """Deterministically identify Shipra scope, entity, action, and request mode."""
+    raw = str(question or "").strip()
+    lowered = raw.lower()
+
+    prompt_words = (
+        "generate prompt", "coding prompt", "prompt bana", "prompt banao",
+        "ai prompt", "prompt generate",
+    )
+    if any(phrase in lowered for phrase in prompt_words):
+        return {
+            "scope": "project",
+            "mode": PROJECT_PROMPT,
+            "action": "prompt",
+            "entity": None,
+        }
+
+    explicit_change_phrases = (
+        "change code", "modify code", "update code", "edit code",
+        "change app.py", "modify app.py", "change server.py",
+        "implement feature", "add feature", "build feature",
+        "new endpoint", "new api", "add api", "create api",
+        "code change", "source code change", "refactor",
+    )
+    explicit_code_change = any(
+        phrase in lowered for phrase in explicit_change_phrases
+    )
+
+    entity_aliases = [
+        ("return order", ("return order", "return orders", "returnorder")),
+        ("order label", ("order label", "order labels", "client order label")),
+        ("store channel", ("store channel", "store channels")),
+        ("sale channel", ("sale channel", "sales channel", "shopify")),
+        ("carrier dashboard", ("carrier dashboard",)),
+        ("sale dashboard", ("sale dashboard", "sales dashboard")),
+        ("price calculator", ("price calculator", "rate calculator")),
+        ("dashboard", ("dashboard", "dashboards")),
+        ("order", ("order", "orders")),
+        ("store", ("store", "stores")),
+        ("carrier", ("carrier", "carriers")),
+        ("shipment", ("shipment", "shipments")),
+        ("tracking", ("tracking", "track order")),
+        ("inventory", ("inventory", "stock")),
+        ("product", ("product", "products")),
+        ("customer", ("customer", "customers", "client", "clients")),
+        ("lead", ("lead", "leads")),
+        ("contact", ("contact", "contacts")),
+        ("station", ("station", "stations")),
+        ("wallet", ("wallet", "cod wallet")),
+        ("settlement", ("settlement", "settlements")),
+        ("delivery", ("delivery", "deliveries")),
+        ("task", ("task", "tasks")),
+        ("analytics", ("analytics", "analysis")),
+    ]
+
+    entity = None
+    for canonical, aliases in entity_aliases:
+        if any(alias in lowered for alias in aliases):
+            entity = canonical
+            break
+
+    action_aliases = [
+        ("create", ("create", "add", "make", "banau", "banao", "banana")),
+        ("assign", ("assign", "apply label", "allocate")),
+        ("connect", ("connect", "activate", "link")),
+        ("update", ("update", "edit", "change")),
+        ("delete", ("delete", "remove")),
+        ("filter", ("filter", "search", "find")),
+        ("list", ("list", "show", "which", "what orders", "all orders")),
+        ("export", ("export", "download", "csv", "excel")),
+        ("import", ("import", "upload")),
+        ("sync", ("sync", "synchronize")),
+        ("return", ("return order", "return")),
+        ("track", ("track", "tracking")),
+        ("validate", ("validate", "validation", "missing", "empty", "without")),
+        ("calculate", ("calculate", "calculator", "rate")),
+        ("view", ("view", "open", "see", "details", "status")),
+    ]
+
+    action = None
+    for canonical, aliases in action_aliases:
+        if any(alias in lowered for alias in aliases):
+            action = canonical
+            break
+
+    explicit_shipra = any(term in lowered for term in (
+        "shipra", "frontend", "backend", "controller", "handler",
+        "repository", "project", "app.py", "server.py", "api",
+    ))
+
+    # Explicitly named general-tech context should remain general unless Shipra
+    # is also named. This avoids hijacking questions such as "React dashboard".
+    general_tech_context = any(term in lowered for term in (
+        "in react", "react me", "react js", "reactjs", "in python", "python flask",
+        "django", "power bi", "tableau", "in excel", "excel dashboard", "google sheets",
+        "generic", "generally",
+    ))
+
+    operational_words = (
+        "how", "kesy", "kaise", "step", "create", "add", "assign",
+        "connect", "update", "edit", "delete", "remove", "filter",
+        "search", "find", "list", "show", "which", "export", "download",
+        "upload", "import", "sync", "track", "validate", "open",
+    )
+    operational_question = any(word in lowered for word in operational_words)
+
+    project_scope = explicit_shipra or (
+        entity is not None
+        and operational_question
+        and not general_tech_context
+    )
+
+    if explicit_code_change:
+        return {
+            "scope": "project",
+            "mode": PROJECT_CHANGE,
+            "action": action or "change",
+            "entity": entity,
+        }
+
+    if project_scope:
+        return {
+            "scope": "project",
+            "mode": PROJECT_EXISTING,
+            "action": action,
+            "entity": entity,
+        }
+
+    return {
+        "scope": "general",
+        "mode": GENERAL,
+        "action": action,
+        "entity": entity,
+    }
+
+
 def classify_question(question):
-    lowered_question = question.lower().strip()
-
-    shipra_feature_terms = {
-        "dashboard",
-        "dashboards",
-        "order",
-        "orders",
-        "return order",
-        "store",
-        "stores",
-        "store channel",
-        "sale channel",
-        "carrier",
-        "carriers",
-        "shipment",
-        "shipments",
-        "tracking",
-        "inventory",
-        "product",
-        "products",
-        "lead",
-        "leads",
-        "station",
-        "label",
-        "labels",
-        "cod",
-        "price calculator",
-    }
-
-    project_action_words = {
-        "create",
-        "add",
-        "make",
-        "open",
-        "use",
-        "assign",
-        "update",
-        "edit",
-        "delete",
-        "remove",
-        "filter",
-        "search",
-        "export",
-        "import",
-        "upload",
-        "sync",
-        "connect",
-        "return",
-        "track",
-        "how",
-        "kesy",
-        "kaise",
-    }
-
-    has_feature = any(
-        term in lowered_question
-        for term in shipra_feature_terms
-    )
-
-    has_project_action = any(
-        word in lowered_question
-        for word in project_action_words
-    )
-
-    if has_feature and has_project_action:
-        return PROJECT_EXISTING
-
-    # existing logic continues below...
-
-    # existing classify_question code continues below...
-    # Exact mock/test order identifiers and direct order-data lookups belong to
-    # the Shipra project pipeline even in a fresh chat.
+    # Deterministic routing first. Gemini is only a fallback for ambiguous text.
     if re.search(r"\bORD-\d+\b", question, flags=re.IGNORECASE):
         return PROJECT_EXISTING
+
+    profile = detect_request_profile(question)
+    if profile["mode"] != GENERAL:
+        return profile["mode"]
 
     lowered_question = question.lower()
     if (
@@ -4370,6 +4439,66 @@ def answer_from_mock_data(question, results, response_language):
 
 
 
+def _extract_mcp_payload(tool_result):
+    payload = getattr(tool_result, "structured_content", None)
+    if isinstance(payload, dict):
+        return payload
+
+    text_value = "\n".join(
+        getattr(block, "text", "")
+        for block in (getattr(tool_result, "content", None) or [])
+        if getattr(block, "type", "") == "text"
+    ).strip()
+
+    parsed = parse_json_object(text_value) if text_value else None
+    return parsed if isinstance(parsed, dict) else {}
+
+
+async def get_mcp_source_health():
+    params = get_mcp_server_params()
+    async with asyncio.timeout(30):
+        async with Client(params) as mcp_client:
+            result = await mcp_client.call_tool("debug_source_root", {})
+            return _extract_mcp_payload(result)
+
+
+def build_source_unavailable_answer(question, health):
+    response_language = get_response_language(question)
+    project_root = health.get("project_root") or "unknown"
+    total_files = int(health.get("total_source_files") or 0)
+    frontend_found = bool(health.get("frontend_found"))
+    backend_found = bool(
+        health.get("backend_application_found")
+        or health.get("backend_web_found")
+    )
+
+    if response_language == "Roman Urdu":
+        return (
+            "### Practical Scenario Guide\n"
+            "Shipra ka raw source code MCP ko available nahi hai, is liye exact "
+            "project steps verify karna possible nahi. Pehle deployment mein "
+            "Shipra.Frontend aur backend source folders ko MCP project root ke "
+            "andar available karna hoga.\n\n"
+            "### Actual Project Code Flow\n"
+            f"MCP project root: `{project_root}`. Searchable source files: "
+            f"{total_files}. Frontend detected: {frontend_found}. Backend detected: "
+            f"{backend_found}. Jab tak raw source visible nahi hota, assistant "
+            "RAG/index snippets ko source-of-truth bana kar workflow invent nahi karega."
+        )
+
+    return (
+        "### Practical Scenario Guide\n"
+        "The raw Shipra source code is not visible to MCP, so exact project "
+        "steps cannot be verified yet. Deploy the Shipra.Frontend and backend "
+        "source folders under the MCP project root first.\n\n"
+        "### Actual Project Code Flow\n"
+        f"MCP project root: `{project_root}`. Searchable source files: "
+        f"{total_files}. Frontend detected: {frontend_found}. Backend detected: "
+        f"{backend_found}. Until raw source is visible, the assistant will not "
+        "treat RAG/index snippets as source-of-truth or invent a workflow."
+    )
+
+
 def build_entity_only_query(question):
     """Remove action words so MCP can verify the underlying feature/entity."""
     lowered = str(question or "").strip()
@@ -4470,6 +4599,37 @@ def ask_shipra_project_ai(question, intent):
         if previous_user_question
         else question
     )
+
+    request_profile = detect_request_profile(question)
+
+    # Validate raw source availability before code-flow retrieval. Mock-data
+    # record lookups are allowed to continue because they use a separate tool.
+    lowered_for_health = question.lower()
+    is_mock_record_lookup = (
+        bool(re.search(r"\bORD-\d+\b", question, flags=re.IGNORECASE))
+        or (
+            ("order" in lowered_for_health or "orders" in lowered_for_health)
+            and any(term in lowered_for_health for term in (
+                "priority", "vip", "fragile", "cod", "prepaid",
+                "delivered", "carrier", "tracking",
+            ))
+            and any(term in lowered_for_health for term in (
+                "which", "show", "find", "list", "what",
+            ))
+        )
+    )
+
+    if not is_mock_record_lookup:
+        try:
+            source_health = asyncio.run(get_mcp_source_health())
+        except Exception:
+            source_health = {}
+
+        if source_health and not bool(source_health.get("raw_source_ready")):
+            return build_source_unavailable_answer(
+                question,
+                source_health,
+            ), []
 
 
     # ------------------------------------------------------------------
@@ -4615,6 +4775,8 @@ def ask_shipra_project_ai(question, intent):
 You are the Shipra project assistant.
 Required output language: {response_language}.
 Detected request type: {intent}.
+Detected entity: {request_profile.get("entity")}.
+Detected action: {request_profile.get("action")}.
 Write explanations in that language; preserve technical identifiers.
 
 ACCURACY CONTRACT:
@@ -4662,11 +4824,10 @@ explain unrelated sources merely because they were retrieved.
 Table column preferences are not table creation. Order boxes are unrelated.
 
 If relevant existing code is available, explain its verified behavior and
-how to use or extend it. Cite the supporting source numbers.
+how to use it. Cite the supporting source numbers.
 If a suitable implementation was not retrieved, say that it was not found
 in the available sources, not that it does not exist anywhere in Shipra.
-Then provide a useful proposed solution using verified project conventions
-where available. Label unverified dependencies and integration assumptions.
+Do not propose new code unless the user explicitly requested a code change.
 
 Use exactly these two top-level headings in this order:
 ### Practical Scenario Guide
@@ -4681,8 +4842,10 @@ In the scenario guide:
 - End with one short Expected Result.
 - Do not explain implementation details here.
 
-For a new feature, describe development/setup steps as proposed actions.
-Never invent an existing menu, screen, permission, button, or API.
+Only for an explicit project_change request, describe development/setup steps
+as proposed actions. For project_existing questions, never turn missing evidence
+into a proposed feature. Never invent an existing menu, screen, permission,
+button, or API.
 
 In the code-flow section, explain relevant existing code first.
 Use [[CODE_SOURCE_N]] markers for existing source snippets; do not reproduce
