@@ -1,3 +1,4 @@
+import sys
 import json
 import math
 import re
@@ -174,14 +175,51 @@ st.write("Ask naturally about the Shipra frontend or backend project.")
 
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 client = genai.Client(api_key=GEMINI_API_KEY)
-async def test_shipra_mcp():
-    server_params = StdioServerParameters(
-        command=(
-            r"D:\shipra-mcp-server"
-            r"\project-source\.venv\Scripts\python.exe"
-        ),
-        args=[r"D:\shipra-mcp-server\server.py"],
+def get_mcp_server_params():
+    """
+    Build MCP stdio launch parameters without any machine-specific Windows path.
+
+    Priority:
+    1) MCP_SERVER_PYTHON / MCP_SERVER_PATH environment variables.
+    2) mcp_server.py beside app.py.
+    3) server.py beside app.py.
+    """
+    app_dir = Path(__file__).resolve().parent
+
+    configured_server = os.getenv("MCP_SERVER_PATH", "").strip()
+    configured_python = os.getenv("MCP_SERVER_PYTHON", "").strip()
+
+    if configured_server:
+        server_path = Path(configured_server).expanduser()
+        if not server_path.is_absolute():
+            server_path = app_dir / server_path
+    else:
+        candidates = [
+            app_dir / "mcp_server.py",
+            app_dir / "server.py",
+        ]
+        server_path = next(
+            (candidate for candidate in candidates if candidate.is_file()),
+            candidates[0],
+        )
+
+    python_command = configured_python or sys.executable
+
+    if not server_path.is_file():
+        raise FileNotFoundError(
+            "MCP server file was not found. "
+            "Put mcp_server.py or server.py beside app.py, "
+            "or set MCP_SERVER_PATH."
+        )
+
+    return StdioServerParameters(
+        command=python_command,
+        args=[str(server_path)],
     )
+
+
+async def test_shipra_mcp():
+    server_params = get_mcp_server_params()
 
     async with asyncio.timeout(30):
         async with Client(server_params) as mcp_client:
@@ -1881,13 +1919,7 @@ def proposed_implementation_is_incomplete(answer):
 
 
 async def collect_mcp_evidence(question, conversation_text, search_results):
-    params = StdioServerParameters(
-        command=(
-            r"D:\shipra-mcp-server"
-            r"\project-source\.venv\Scripts\python.exe"
-        ),
-        args=[r"D:\shipra-mcp-server\server.py"],
-    )
+    params = get_mcp_server_params()
 
     instructions = """
 You collect source evidence for a Shipra project question.
