@@ -538,13 +538,13 @@ st.markdown(
     }
 
     .shipra-simple-title-wrap {
-        margin-top: 5.2rem;
-        padding: 3.2rem 1.5rem;
-        border-radius: 1.35rem;
+        margin-top: 2.1rem;
+        padding: 2.45rem 1.5rem;
+        border-radius: 1.25rem;
         background: rgba(255,255,255,0.018);
         border: 1px solid rgba(255,255,255,0.055);
         box-shadow:
-            0 28px 80px rgba(0,0,0,0.20),
+            0 24px 70px rgba(0,0,0,0.18),
             inset 0 1px 0 rgba(255,255,255,0.025);
     }
 
@@ -566,6 +566,34 @@ st.markdown(
         background: #252629 !important;
         border: 1px solid rgba(255,255,255,0.09) !important;
         box-shadow: 0 16px 45px rgba(0,0,0,0.24) !important;
+    }
+
+    /* Professional chat identities */
+    [data-testid="stChatMessageAvatarUser"],
+    [data-testid="stChatMessageAvatarAssistant"] {
+        background: #27282b !important;
+        border: 1px solid rgba(255, 255, 255, 0.10) !important;
+        box-shadow:
+            0 8px 22px rgba(0, 0, 0, 0.20),
+            inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        color: #e7e7e7 !important;
+    }
+
+    [data-testid="stChatMessageAvatarUser"] span,
+    [data-testid="stChatMessageAvatarAssistant"] span,
+    [data-testid="stChatMessageAvatarUser"] svg,
+    [data-testid="stChatMessageAvatarAssistant"] svg {
+        color: #e2e2e2 !important;
+        fill: currentColor !important;
+    }
+
+    [data-testid="stChatMessageAvatarAssistant"] {
+        background:
+            linear-gradient(145deg, #303134 0%, #232427 100%) !important;
+    }
+
+    [data-testid="stChatMessageAvatarUser"] {
+        background: #242528 !important;
     }
 
     </style>
@@ -4318,7 +4346,16 @@ for conversation in list_conversations():
 
 # Render the selected conversation above the sticky composer.
 for message in st.session_state["chat_history"]:
-    with st.chat_message(message["role"]):
+    message_avatar = (
+        ":material/person:"
+        if message["role"] == "user"
+        else ":material/auto_awesome:"
+    )
+
+    with st.chat_message(
+        message["role"],
+        avatar=message_avatar,
+    ):
         st.markdown(message["content"])
 
 
@@ -4339,10 +4376,16 @@ if question:
 
     st.session_state.pop("pending_clarification_question", None)
 
-    with st.chat_message("user"):
+    with st.chat_message(
+        "user",
+        avatar=":material/person:",
+    ):
         st.markdown(question)
 
-    with st.chat_message("assistant"):
+    with st.chat_message(
+        "assistant",
+        avatar=":material/auto_awesome:",
+    ):
         with st.spinner("AI is preparing your answer..."):
             try:
                 answer, sources = ask_shipra_ai(question)
