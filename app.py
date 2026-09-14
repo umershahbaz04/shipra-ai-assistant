@@ -373,6 +373,20 @@ st.markdown(
         line-height: 1.45;
     }
 
+    .shipra-simple-title-wrap {
+        margin: 4.6rem 0 2.2rem 0;
+        text-align: center;
+    }
+
+    .shipra-simple-title {
+        margin: 0;
+        color: #f5f5f5;
+        font-size: clamp(2.2rem, 5vw, 3.8rem);
+        line-height: 1.05;
+        font-weight: 760;
+        letter-spacing: -0.045em;
+    }
+
     /* Chat messages */
     [data-testid="stChatMessage"] {
         background: transparent;
@@ -468,42 +482,9 @@ st.sidebar.markdown(
 
 st.markdown(
     """
-    <section class="shipra-main-hero">
-        <div class="shipra-main-eyebrow">● Shipra Developer Intelligence</div>
-        <h1 class="shipra-main-title">Shipra Full-Stack AI Assistant</h1>
-        <div class="shipra-main-subtitle">
-            Explore existing Shipra features, trace frontend-to-backend flows,
-            inspect APIs and handlers, and understand project behavior from
-            verified source evidence.
-        </div>
-
-        <div class="shipra-feature-grid">
-            <div class="shipra-feature-card">
-                <div class="shipra-feature-title">Trace application flows</div>
-                <div class="shipra-feature-copy">
-                    Follow active pages, API calls, controllers, handlers and repositories.
-                </div>
-            </div>
-            <div class="shipra-feature-card">
-                <div class="shipra-feature-title">Explain existing features</div>
-                <div class="shipra-feature-copy">
-                    Understand how current Shipra screens and workflows behave.
-                </div>
-            </div>
-            <div class="shipra-feature-card">
-                <div class="shipra-feature-title">Inspect validations</div>
-                <div class="shipra-feature-copy">
-                    Check frontend validation, backend rules and verified failure paths.
-                </div>
-            </div>
-            <div class="shipra-feature-card">
-                <div class="shipra-feature-title">Research project code</div>
-                <div class="shipra-feature-copy">
-                    Find symbols, references, routes, controllers and exact functions.
-                </div>
-            </div>
-        </div>
-    </section>
+    <div class="shipra-simple-title-wrap">
+        <h1 class="shipra-simple-title">Shipra Full-Stack AI Assistant</h1>
+    </div>
     """,
     unsafe_allow_html=True,
 )
