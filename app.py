@@ -162,6 +162,150 @@ st.set_page_config(
     layout="centered",
 )
 
+# ---------------------------------------------------------------------------
+# Professional sidebar presentation
+# NOTE: selectors are scoped to Streamlit's sidebar only.
+# ---------------------------------------------------------------------------
+st.markdown(
+    """
+    <style>
+    [data-testid="stSidebar"] {
+        background:
+            radial-gradient(circle at 18% 0%, rgba(59, 130, 246, 0.13), transparent 24%),
+            linear-gradient(180deg, #0f172a 0%, #111827 55%, #0b1220 100%);
+        border-right: 1px solid rgba(148, 163, 184, 0.14);
+    }
+
+    [data-testid="stSidebar"] > div:first-child {
+        padding-top: 1.15rem;
+    }
+
+    [data-testid="stSidebar"] .shipra-sidebar-brand {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.25rem 0.25rem 0.9rem 0.25rem;
+        margin-bottom: 0.45rem;
+    }
+
+    [data-testid="stSidebar"] .shipra-brand-mark {
+        width: 2.25rem;
+        height: 2.25rem;
+        border-radius: 0.7rem;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(135deg, #2563eb, #4f46e5);
+        box-shadow: 0 8px 24px rgba(37, 99, 235, 0.28);
+        font-size: 1.05rem;
+        flex: 0 0 auto;
+    }
+
+    [data-testid="stSidebar"] .shipra-brand-title {
+        color: #f8fafc;
+        font-weight: 700;
+        font-size: 0.98rem;
+        line-height: 1.15;
+        letter-spacing: -0.01em;
+    }
+
+    [data-testid="stSidebar"] .shipra-brand-subtitle {
+        color: #94a3b8;
+        font-size: 0.73rem;
+        margin-top: 0.16rem;
+    }
+
+    [data-testid="stSidebar"] .shipra-section-label {
+        color: #64748b;
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.095em;
+        text-transform: uppercase;
+        margin: 1.05rem 0 0.45rem 0.2rem;
+    }
+
+    [data-testid="stSidebar"] hr {
+        border-color: rgba(148, 163, 184, 0.13);
+        margin: 0.75rem 0;
+    }
+
+    [data-testid="stSidebar"] .stButton > button {
+        min-height: 2.35rem;
+        border-radius: 0.7rem;
+        border: 1px solid transparent;
+        background: transparent;
+        color: #cbd5e1;
+        text-align: left;
+        justify-content: flex-start;
+        font-size: 0.84rem;
+        font-weight: 500;
+        transition:
+            background-color 120ms ease,
+            border-color 120ms ease,
+            color 120ms ease,
+            transform 120ms ease;
+    }
+
+    [data-testid="stSidebar"] .stButton > button:hover {
+        background: rgba(148, 163, 184, 0.10);
+        border-color: rgba(148, 163, 184, 0.12);
+        color: #f8fafc;
+        transform: translateY(-1px);
+    }
+
+    [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+        background: rgba(37, 99, 235, 0.18);
+        border-color: rgba(96, 165, 250, 0.24);
+        color: #eff6ff;
+        box-shadow: inset 3px 0 0 #3b82f6;
+    }
+
+    [data-testid="stSidebar"] div[data-testid="stPopover"] button {
+        min-width: 2.25rem;
+        width: 2.25rem;
+        padding-left: 0;
+        padding-right: 0;
+        justify-content: center;
+        color: #94a3b8;
+        border-radius: 0.65rem;
+    }
+
+    [data-testid="stSidebar"] div[data-testid="stPopover"] button:hover {
+        color: #f8fafc;
+        background: rgba(148, 163, 184, 0.10);
+    }
+
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+        color: #94a3b8;
+    }
+
+    [data-testid="stSidebar"] .stAlert {
+        border-radius: 0.7rem;
+        font-size: 0.8rem;
+    }
+
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] span,
+    [data-testid="stSidebar"] label {
+        color: inherit;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.sidebar.markdown(
+    """
+    <div class="shipra-sidebar-brand">
+        <div class="shipra-brand-mark">✦</div>
+        <div>
+            <div class="shipra-brand-title">Shipra AI Assistant</div>
+            <div class="shipra-brand-subtitle">Developer workspace</div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("🤖 Shipra Full-Stack AI Assistant")
 st.write("Ask naturally about the Shipra frontend or backend project.")
 
@@ -220,7 +364,16 @@ async def test_shipra_mcp():
             return [tool.name for tool in result.tools]
 
 
-if st.sidebar.button("Test MCP connection"):
+st.sidebar.markdown(
+    '<div class="shipra-section-label">Workspace</div>',
+    unsafe_allow_html=True,
+)
+
+if st.sidebar.button(
+    "◉  Test MCP connection",
+    use_container_width=True,
+    key="sidebar_test_mcp",
+):
     try:
         with st.spinner("Connecting to Shipra MCP..."):
             tool_names = asyncio.run(test_shipra_mcp())
@@ -3795,12 +3948,21 @@ def switch_conversation(conversation_id):
 
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Chats")
 
-if st.sidebar.button("＋ New chat", use_container_width=True):
+if st.sidebar.button(
+    "＋  New chat",
+    use_container_width=True,
+    type="primary",
+    key="sidebar_new_chat",
+):
     new_id = create_conversation()
     switch_conversation(new_id)
     st.rerun()
+
+st.sidebar.markdown(
+    '<div class="shipra-section-label">Recent chats</div>',
+    unsafe_allow_html=True,
+)
 
 for conversation in list_conversations():
     conversation_id = conversation["id"]
@@ -3809,15 +3971,24 @@ for conversation in list_conversations():
         conversation_id == st.session_state["active_conversation_id"]
     )
 
-    button_label = f"▸ {label}" if is_active else label
+    # Keep sidebar rows compact and predictable while preserving the full
+    # conversation title inside the overflow menu.
+    display_label = label
+    if len(display_label) > 31:
+        display_label = display_label[:28].rstrip() + "..."
 
-    chat_col, menu_col = st.sidebar.columns([0.84, 0.16], gap="small")
+    chat_col, menu_col = st.sidebar.columns(
+        [0.86, 0.14],
+        gap="small",
+        vertical_alignment="center",
+    )
 
     with chat_col:
         if st.button(
-            button_label,
+            display_label,
             key=f"chat_{conversation_id}",
             use_container_width=True,
+            type="primary" if is_active else "secondary",
         ):
             switch_conversation(conversation_id)
             st.rerun()
