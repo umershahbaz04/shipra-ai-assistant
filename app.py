@@ -172,8 +172,8 @@ st.markdown(
     [data-testid="stSidebar"] {
         background:
             radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.04), transparent 24%),
-            linear-gradient(180deg, #111111 0%, #161616 55%, #0b0b0b 100%);
-        border-right: 1px solid rgba(148, 163, 184, 0.14);
+            linear-gradient(180deg, #202020 0%, #1c1c1c 55%, #181818 100%);
+        border-right: 1px solid rgba(255, 255, 255, 0.08);
     }
 
     [data-testid="stSidebar"] > div:first-child {
@@ -194,14 +194,14 @@ st.markdown(
         border-radius: 0.7rem;
         display: grid;
         place-items: center;
-        background: linear-gradient(135deg, #2a2a2a, #111111);
+        background: linear-gradient(135deg, #2a2a2a, #1a1a1a);
         box-shadow: 0 8px 24px rgba(255, 255, 255, 0.08);
         font-size: 1.05rem;
         flex: 0 0 auto;
     }
 
     [data-testid="stSidebar"] .shipra-brand-title {
-        color: #f8fafc;
+        color: #f5f5f5;
         font-weight: 700;
         font-size: 0.98rem;
         line-height: 1.15;
@@ -209,13 +209,13 @@ st.markdown(
     }
 
     [data-testid="stSidebar"] .shipra-brand-subtitle {
-        color: #94a3b8;
+        color: #9b9b9b;
         font-size: 0.73rem;
         margin-top: 0.16rem;
     }
 
     [data-testid="stSidebar"] .shipra-section-label {
-        color: #64748b;
+        color: #7a7a7a;
         font-size: 0.68rem;
         font-weight: 700;
         letter-spacing: 0.095em;
@@ -233,7 +233,7 @@ st.markdown(
         border-radius: 0.7rem;
         border: 1px solid transparent;
         background: transparent;
-        color: #cbd5e1;
+        color: #c9c9c9;
         text-align: left;
         justify-content: flex-start;
         font-size: 0.84rem;
@@ -248,14 +248,14 @@ st.markdown(
     [data-testid="stSidebar"] .stButton > button:hover {
         background: rgba(148, 163, 184, 0.10);
         border-color: rgba(148, 163, 184, 0.12);
-        color: #f8fafc;
+        color: #f5f5f5;
         transform: translateY(-1px);
     }
 
     [data-testid="stSidebar"] .stButton > button[kind="primary"] {
-        background: rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.07);
         border-color: rgba(255, 255, 255, 0.14);
-        color: #f5f5f5;
+        color: #f3f3f3;
         box-shadow: inset 3px 0 0 #d4d4d4;
     }
 
@@ -265,17 +265,17 @@ st.markdown(
         padding-left: 0;
         padding-right: 0;
         justify-content: center;
-        color: #94a3b8;
+        color: #9b9b9b;
         border-radius: 0.65rem;
     }
 
     [data-testid="stSidebar"] div[data-testid="stPopover"] button:hover {
-        color: #f8fafc;
+        color: #f5f5f5;
         background: rgba(148, 163, 184, 0.10);
     }
 
     [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
-        color: #94a3b8;
+        color: #9b9b9b;
     }
 
     [data-testid="stSidebar"] .stAlert {
@@ -290,8 +290,8 @@ st.markdown(
     }
     /* ---------------- Main app grayscale theme ---------------- */
     html, body, [data-testid="stAppViewContainer"] {
-        background: #0b0b0b;
-        color: #f2f2f2;
+        background: #151515;
+        color: #f1f1f1;
     }
 
     [data-testid="stHeader"] {
@@ -311,7 +311,7 @@ st.markdown(
         border-radius: 1.25rem;
         background:
             linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.015)),
-            #111111;
+            #1a1a1a;
         border: 1px solid rgba(255, 255, 255, 0.08);
         box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
     }
@@ -320,7 +320,7 @@ st.markdown(
         display: inline-flex;
         align-items: center;
         gap: 0.45rem;
-        color: #a3a3a3;
+        color: #aaaaaa;
         font-size: 0.72rem;
         font-weight: 700;
         letter-spacing: 0.11em;
@@ -330,7 +330,7 @@ st.markdown(
 
     .shipra-main-title {
         margin: 0;
-        color: #fafafa;
+        color: #f7f7f7;
         font-size: clamp(2rem, 5vw, 3.35rem);
         line-height: 1.02;
         font-weight: 760;
@@ -338,7 +338,7 @@ st.markdown(
     }
 
     .shipra-main-subtitle {
-        color: #a3a3a3;
+        color: #aaaaaa;
         font-size: 1rem;
         line-height: 1.65;
         margin-top: 0.95rem;
@@ -353,7 +353,7 @@ st.markdown(
     }
 
     .shipra-feature-card {
-        background: #141414;
+        background: #1e1e1e;
         border: 1px solid rgba(255, 255, 255, 0.07);
         border-radius: 0.9rem;
         padding: 1rem 1.05rem;
@@ -361,14 +361,14 @@ st.markdown(
     }
 
     .shipra-feature-title {
-        color: #e5e5e5;
+        color: #e1e1e1;
         font-size: 0.88rem;
         font-weight: 650;
         margin-bottom: 0.3rem;
     }
 
     .shipra-feature-copy {
-        color: #8d8d8d;
+        color: #8f8f8f;
         font-size: 0.78rem;
         line-height: 1.45;
     }
@@ -380,7 +380,7 @@ st.markdown(
 
     .shipra-simple-title {
         margin: 0;
-        color: #f5f5f5;
+        color: #f3f3f3;
         font-size: clamp(2.2rem, 5vw, 3.8rem);
         line-height: 1.05;
         font-weight: 760;
@@ -399,54 +399,54 @@ st.markdown(
 
     /* Chat input */
     [data-testid="stChatInput"] {
-        background: #171717;
+        background: #242424;
         border: 1px solid rgba(255, 255, 255, 0.10);
         border-radius: 1rem;
         box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
     }
 
     [data-testid="stChatInput"] textarea {
-        color: #f5f5f5 !important;
-        caret-color: #f5f5f5;
+        color: #f3f3f3 !important;
+        caret-color: #f3f3f3;
     }
 
     [data-testid="stChatInput"] textarea::placeholder {
-        color: #777777 !important;
+        color: #7d7d7d !important;
     }
 
     [data-testid="stChatInput"] button {
-        background: #2b2b2b !important;
+        background: #303030 !important;
         border-radius: 0.75rem !important;
         color: #f3f3f3 !important;
     }
 
     [data-testid="stChatInput"] button:hover {
-        background: #3a3a3a !important;
+        background: #3d3d3d !important;
     }
 
     /* Generic buttons in main area */
     [data-testid="stMain"] .stButton > button {
-        background: #171717;
+        background: #242424;
         border: 1px solid rgba(255, 255, 255, 0.09);
-        color: #e7e7e7;
+        color: #e6e6e6;
         border-radius: 0.75rem;
     }
 
     [data-testid="stMain"] .stButton > button:hover {
-        background: #222222;
+        background: #303030;
         border-color: rgba(255, 255, 255, 0.14);
         color: #ffffff;
     }
 
     /* Markdown/code surfaces */
     [data-testid="stMain"] pre {
-        background: #111111 !important;
+        background: #1a1a1a !important;
         border: 1px solid rgba(255, 255, 255, 0.07);
         border-radius: 0.85rem;
     }
 
     [data-testid="stMain"] code {
-        color: #dedede;
+        color: #dddddd;
     }
 
     [data-testid="stMain"] hr {
