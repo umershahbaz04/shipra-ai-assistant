@@ -3657,7 +3657,7 @@ Finish when sufficient evidence is collected or the search is exhausted.
                     raise ValueError("Symbol name is required")
                 arguments = {"symbol_name": symbol_name}
                 
-                        elif tool == "find_imports":
+            elif tool == "find_imports":
                 symbol_name = str(
                     arguments.get("symbol_name", "")
                 ).strip()
