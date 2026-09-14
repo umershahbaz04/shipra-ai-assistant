@@ -2694,6 +2694,67 @@ def get_mcp_seed_queries(question, search_results):
             "Shopify",
         )
 
+    # Generic feature discovery for every Shipra question.
+    # These seeds let MCP search exact project text/path names even when the
+    # feature was not manually hard-coded above.
+    raw_words = re.findall(r"[A-Za-z0-9]+", question)
+
+    discovery_stop_words = {
+        "a", "an", "and", "are", "can", "do", "does", "for", "from",
+        "how", "i", "in", "is", "it", "me", "my", "of", "on", "or",
+        "please", "shipra", "step", "steps", "the", "this", "to", "what",
+        "when", "where", "which", "who", "why", "with", "you", "your",
+        "batao", "btao", "hai", "hain", "hy", "ka", "kaise", "kar",
+        "kare", "karen", "karna", "ke", "kesy", "ki", "ko", "mai",
+        "main", "mein", "mujhe", "mjhy", "sy", "se",
+    }
+
+    meaningful_words = [
+        word
+        for word in raw_words
+        if word.lower() not in discovery_stop_words
+        and len(word) >= 3
+    ]
+
+    # Search the strongest short phrases first. Keep action words here because
+    # feature names such as "return order" can include an action-like word.
+    if meaningful_words:
+        # Full phrase is useful for exact comments, labels, route names, etc.
+        add(" ".join(meaningful_words[:4]))
+
+        # Consecutive 2- and 3-word phrases catch names such as:
+        # return order, carrier dashboard, store channel, price calculator.
+        for size in (3, 2):
+            if len(meaningful_words) < size:
+                continue
+
+            for start_index in range(
+                0,
+                min(len(meaningful_words) - size + 1, 4),
+            ):
+                phrase_words = meaningful_words[
+                    start_index:start_index + size
+                ]
+                phrase = " ".join(phrase_words)
+                add(phrase)
+
+                # Also search common code-name forms.
+                pascal_name = "".join(
+                    word[:1].upper() + word[1:]
+                    for word in phrase_words
+                )
+                camel_name = (
+                    pascal_name[:1].lower() + pascal_name[1:]
+                    if pascal_name
+                    else ""
+                )
+
+                add(pascal_name, camel_name)
+
+        # Single feature terms are the last generic fallback.
+        for word in meaningful_words[:4]:
+            add(word)
+
     # Reuse exact code identifiers already surfaced by indexed retrieval as
     # additional literal-search hints, without trusting those paths as live MCP evidence.
     for item in search_results[:6]:
@@ -2701,7 +2762,7 @@ def get_mcp_seed_queries(question, search_results):
         if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{4,}", symbol):
             add(symbol)
 
-    return seeds[:10]
+    return seeds[:16]
 
 
 def mcp_match_priority(file_path, seed_query, question):
