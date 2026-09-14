@@ -3811,31 +3811,53 @@ if st.sidebar.button("＋ New chat", use_container_width=True):
     st.rerun()
 
 for conversation in list_conversations():
+    conversation_id = conversation["id"]
     label = conversation["title"] or "New chat"
     is_active = (
-        conversation["id"] == st.session_state["active_conversation_id"]
+        conversation_id == st.session_state["active_conversation_id"]
     )
-    button_label = f"▸ {label}" if is_active else label
-    if st.sidebar.button(
-        button_label,
-        key=f"chat_{conversation['id']}",
-        use_container_width=True,
-    ):
-        switch_conversation(conversation["id"])
-        st.rerun()
 
-with st.sidebar.expander("Chat options"):
-    if st.button("Delete current chat", use_container_width=True):
-        current_id = st.session_state["active_conversation_id"]
-        delete_conversation(current_id)
-        remaining = list_conversations(limit=1)
-        next_id = (
-            remaining[0]["id"]
-            if remaining
-            else create_conversation()
-        )
-        switch_conversation(next_id)
-        st.rerun()
+    button_label = f"▸ {label}" if is_active else label
+
+    chat_col, menu_col = st.sidebar.columns([0.84, 0.16], gap="small")
+
+    with chat_col:
+        if st.button(
+            button_label,
+            key=f"chat_{conversation_id}",
+            use_container_width=True,
+        ):
+            switch_conversation(conversation_id)
+            st.rerun()
+
+    with menu_col:
+        with st.popover("⋮"):
+            st.caption(label)
+
+            if st.button(
+                "Delete chat",
+                key=f"delete_chat_{conversation_id}",
+                use_container_width=True,
+            ):
+                deleting_active_chat = (
+                    conversation_id
+                    == st.session_state["active_conversation_id"]
+                )
+
+                delete_conversation(conversation_id)
+
+                if deleting_active_chat:
+                    remaining = list_conversations(limit=1)
+
+                    next_id = (
+                        remaining[0]["id"]
+                        if remaining
+                        else create_conversation()
+                    )
+
+                    switch_conversation(next_id)
+
+                st.rerun()
 
 
 # Render the selected conversation above the sticky composer.
