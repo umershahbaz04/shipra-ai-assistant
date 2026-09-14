@@ -867,6 +867,47 @@ st.markdown(
         }
     }
 
+    /* Distinguish user prompts from assistant responses */
+    [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
+        background: transparent !important;
+        margin-top: 0.7rem !important;
+        margin-bottom: 1.05rem !important;
+    }
+
+    [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"])
+    [data-testid="stChatMessageContent"] {
+        display: inline-block;
+        width: fit-content;
+        max-width: min(760px, 82%);
+        padding: 0.72rem 1rem;
+        border-radius: 0.95rem;
+        background:
+            linear-gradient(
+                180deg,
+                rgba(255,255,255,0.055),
+                rgba(255,255,255,0.035)
+            ),
+            #1b1c1f;
+        border: 1px solid rgba(255,255,255,0.085);
+        box-shadow:
+            0 8px 24px rgba(0,0,0,0.16),
+            inset 0 1px 0 rgba(255,255,255,0.025);
+        color: #f3f3f3 !important;
+    }
+
+    [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"])
+    [data-testid="stChatMessageContent"] p {
+        margin: 0 !important;
+        color: #f3f3f3 !important;
+        font-weight: 540;
+    }
+
+    [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"])
+    [data-testid="stChatMessageAvatarUser"] {
+        background: #242529 !important;
+        border-color: rgba(255,255,255,0.12) !important;
+    }
+
     </style>
     """,
     unsafe_allow_html=True,
