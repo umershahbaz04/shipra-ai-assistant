@@ -627,6 +627,246 @@ st.markdown(
         box-shadow: none !important;
     }
 
+    /* =========================================================
+       Final cohesive Shipra UI system
+       ========================================================= */
+
+    :root {
+        --shipra-bg: #111214;
+        --shipra-bg-2: #151619;
+        --shipra-panel: #1b1c1f;
+        --shipra-panel-soft: #202125;
+        --shipra-border: rgba(255, 255, 255, 0.075);
+        --shipra-border-soft: rgba(255, 255, 255, 0.045);
+        --shipra-text: #f1f1f1;
+        --shipra-muted: #9a9a9a;
+    }
+
+    html,
+    body,
+    [data-testid="stAppViewContainer"] {
+        background: var(--shipra-bg) !important;
+        color: var(--shipra-text) !important;
+    }
+
+    [data-testid="stMain"] {
+        background:
+            radial-gradient(
+                circle at 50% 12%,
+                rgba(255, 255, 255, 0.035),
+                transparent 28%
+            ),
+            linear-gradient(
+                180deg,
+                #151619 0%,
+                #121315 48%,
+                #111214 100%
+            ) !important;
+    }
+
+    [data-testid="stMainBlockContainer"],
+    [data-testid="stAppViewBlockContainer"] {
+        background: transparent !important;
+    }
+
+    [data-testid="stHeader"] {
+        background: rgba(17, 18, 20, 0.96) !important;
+        border-bottom: 1px solid var(--shipra-border-soft) !important;
+        backdrop-filter: blur(14px);
+        box-shadow: none !important;
+    }
+
+    [data-testid="stToolbar"] {
+        background: transparent !important;
+    }
+
+    /* Sidebar */
+    [data-testid="stSidebar"] {
+        background:
+            linear-gradient(
+                180deg,
+                #1a1b1d 0%,
+                #17181a 58%,
+                #151618 100%
+            ) !important;
+        border-right: 1px solid var(--shipra-border-soft) !important;
+    }
+
+    /* Main title: remove the heavy card feel */
+    .shipra-simple-title-wrap {
+        margin-top: 1.6rem !important;
+        margin-bottom: 1.8rem !important;
+        padding: 1.9rem 1rem 1.55rem !important;
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        text-align: center;
+    }
+
+    .shipra-simple-title {
+        color: #f5f5f5 !important;
+        font-size: clamp(2.15rem, 4.6vw, 3.35rem) !important;
+        line-height: 1.04 !important;
+        font-weight: 760 !important;
+        letter-spacing: -0.045em !important;
+        text-shadow: none !important;
+    }
+
+    /* Conversation canvas */
+    [data-testid="stChatMessage"] {
+        max-width: 900px;
+        margin-left: auto;
+        margin-right: auto;
+        background: transparent !important;
+        border: 0 !important;
+    }
+
+    [data-testid="stChatMessageContent"] {
+        color: #ededed !important;
+    }
+
+    /* Refined chat identities */
+    [data-testid="stChatMessageAvatarUser"],
+    [data-testid="stChatMessageAvatarAssistant"] {
+        background: #1f2023 !important;
+        border: 1px solid rgba(255,255,255,0.09) !important;
+        box-shadow: none !important;
+    }
+
+    [data-testid="stChatMessageAvatarAssistant"] {
+        background: linear-gradient(145deg, #292a2e, #1e1f22) !important;
+    }
+
+    /* Bottom composer zone:
+       force every parent to the same page surface so no grey side strips appear */
+    [data-testid="stBottomBlockContainer"],
+    [data-testid="stBottomBlockContainer"] > div,
+    [data-testid="stBottomBlockContainer"] section,
+    [data-testid="stBottomBlockContainer"] form {
+        background: transparent !important;
+        background-image: none !important;
+        border: 0 !important;
+        box-shadow: none !important;
+    }
+
+    [data-testid="stBottomBlockContainer"] {
+        background:
+            linear-gradient(
+                180deg,
+                rgba(17,18,20,0) 0%,
+                rgba(17,18,20,0.92) 28%,
+                #111214 58%,
+                #111214 100%
+            ) !important;
+        padding-top: 1.35rem !important;
+        padding-bottom: 1.2rem !important;
+    }
+
+    [data-testid="stChatInput"] {
+        max-width: 900px;
+        margin-left: auto !important;
+        margin-right: auto !important;
+        background: #202125 !important;
+        border: 1px solid rgba(255,255,255,0.10) !important;
+        border-radius: 1rem !important;
+        box-shadow:
+            0 18px 50px rgba(0,0,0,0.28),
+            inset 0 1px 0 rgba(255,255,255,0.025) !important;
+    }
+
+    [data-testid="stChatInput"] textarea {
+        color: #f1f1f1 !important;
+        background: transparent !important;
+    }
+
+    [data-testid="stChatInput"] textarea::placeholder {
+        color: #858585 !important;
+    }
+
+    [data-testid="stChatInput"] button {
+        background: #2c2d31 !important;
+        border: 1px solid rgba(255,255,255,0.06) !important;
+        color: #f1f1f1 !important;
+        border-radius: 0.72rem !important;
+    }
+
+    [data-testid="stChatInput"] button:hover {
+        background: #35363a !important;
+    }
+
+    /* Main-area markdown surfaces */
+    [data-testid="stMain"] pre {
+        background: #191a1d !important;
+        border: 1px solid var(--shipra-border) !important;
+        border-radius: 0.9rem !important;
+    }
+
+    [data-testid="stMain"] code {
+        color: #dddddd !important;
+    }
+
+    /* Sidebar interaction refinement */
+    [data-testid="stSidebar"] .stButton > button {
+        background: transparent !important;
+        border: 1px solid transparent !important;
+        color: #c9c9c9 !important;
+        box-shadow: none !important;
+    }
+
+    [data-testid="stSidebar"] .stButton > button:hover {
+        background: rgba(255,255,255,0.055) !important;
+        border-color: rgba(255,255,255,0.065) !important;
+        color: #f2f2f2 !important;
+        transform: none !important;
+    }
+
+    [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+        background: #232427 !important;
+        border-color: rgba(255,255,255,0.10) !important;
+        color: #f1f1f1 !important;
+        box-shadow: inset 2px 0 0 #d0d0d0 !important;
+    }
+
+    [data-testid="stSidebar"] div[data-testid="stPopover"] button {
+        background: #242529 !important;
+        border: 1px solid rgba(255,255,255,0.08) !important;
+    }
+
+    /* Scrollbars */
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: #4b4b4b transparent;
+    }
+
+    *::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+
+    *::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    *::-webkit-scrollbar-thumb {
+        background: #44464a;
+        border-radius: 999px;
+    }
+
+    *::-webkit-scrollbar-thumb:hover {
+        background: #55575b;
+    }
+
+    @media (max-width: 900px) {
+        .shipra-simple-title-wrap {
+            margin-top: 1rem !important;
+            padding-top: 1.35rem !important;
+        }
+
+        [data-testid="stChatInput"] {
+            width: calc(100% - 1.2rem) !important;
+        }
+    }
+
     </style>
     """,
     unsafe_allow_html=True,
