@@ -3,6 +3,10 @@ import math
 import re
 import time
 import asyncio
+import sqlite3
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 from mcp import Client, StdioServerParameters
 from collections import Counter, defaultdict
 
@@ -11,6 +15,152 @@ import streamlit as st
 from google import genai
 from sentence_transformers import SentenceTransformer
 
+
+
+# ---------------------------------------------------------------------------
+# Persistent chat history (SQLite)
+# ---------------------------------------------------------------------------
+# NOTE: SQLite persists on a normal/local server disk. On ephemeral cloud
+# hosts, use an external DB (Postgres/Supabase) for persistence across redeploys.
+CHAT_DB_PATH = Path(__file__).resolve().with_name("shipra_chat_history.db")
+
+
+def _chat_db():
+    connection = sqlite3.connect(CHAT_DB_PATH)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    return connection
+
+
+def init_chat_db():
+    with _chat_db() as db:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id TEXT NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(conversation_id)
+                    REFERENCES conversations(id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_messages_conversation
+            ON messages(conversation_id, id)
+            """
+        )
+
+
+def utc_now_text():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def create_conversation(title="New chat"):
+    conversation_id = uuid.uuid4().hex
+    now = utc_now_text()
+    with _chat_db() as db:
+        db.execute(
+            """
+            INSERT INTO conversations(id, title, created_at, updated_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (conversation_id, title, now, now),
+        )
+    return conversation_id
+
+
+def list_conversations(limit=40):
+    with _chat_db() as db:
+        return db.execute(
+            """
+            SELECT id, title, created_at, updated_at
+            FROM conversations
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+
+def load_conversation(conversation_id):
+    with _chat_db() as db:
+        rows = db.execute(
+            """
+            SELECT role, content, created_at
+            FROM messages
+            WHERE conversation_id = ?
+            ORDER BY id ASC
+            """,
+            (conversation_id,),
+        ).fetchall()
+    return [
+        {
+            "role": row["role"],
+            "content": row["content"],
+            "created_at": row["created_at"],
+        }
+        for row in rows
+    ]
+
+
+def save_message(conversation_id, role, content):
+    now = utc_now_text()
+    with _chat_db() as db:
+        db.execute(
+            """
+            INSERT INTO messages(conversation_id, role, content, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (conversation_id, role, content, now),
+        )
+        db.execute(
+            """
+            UPDATE conversations
+            SET updated_at = ?
+            WHERE id = ?
+            """,
+            (now, conversation_id),
+        )
+
+
+def set_conversation_title(conversation_id, first_question):
+    title = re.sub(r"\s+", " ", first_question).strip()
+    if len(title) > 48:
+        title = title[:45].rstrip() + "..."
+    if not title:
+        title = "New chat"
+
+    with _chat_db() as db:
+        db.execute(
+            "UPDATE conversations SET title = ? WHERE id = ?",
+            (title, conversation_id),
+        )
+
+
+def delete_conversation(conversation_id):
+    with _chat_db() as db:
+        db.execute(
+            "DELETE FROM conversations WHERE id = ?",
+            (conversation_id,),
+        )
+
+
+init_chat_db()
 
 st.set_page_config(
     page_title="Shipra AI Assistant",
@@ -2782,94 +2932,121 @@ def ask_shipra_ai(question):
         intent,
     )
 
-if "chat_history" not in st.session_state:
-    st.session_state["chat_history"] = []
+if "active_conversation_id" not in st.session_state:
+    existing_conversations = list_conversations(limit=1)
+    if existing_conversations:
+        st.session_state["active_conversation_id"] = existing_conversations[0]["id"]
+    else:
+        st.session_state["active_conversation_id"] = create_conversation()
 
-# Native Streamlit chat input stays pinned to the bottom of the viewport,
-# similar to ChatGPT/Claude, while the answer content scrolls above it.
-question = st.chat_input(
-    "Ask Shipra AI...",
-)
+if "chat_history" not in st.session_state:
+    st.session_state["chat_history"] = load_conversation(
+        st.session_state["active_conversation_id"]
+    )
+
+
+def switch_conversation(conversation_id):
+    st.session_state["active_conversation_id"] = conversation_id
+    st.session_state["chat_history"] = load_conversation(conversation_id)
+
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("Chats")
+
+if st.sidebar.button("＋ New chat", use_container_width=True):
+    new_id = create_conversation()
+    switch_conversation(new_id)
+    st.rerun()
+
+for conversation in list_conversations():
+    label = conversation["title"] or "New chat"
+    is_active = (
+        conversation["id"] == st.session_state["active_conversation_id"]
+    )
+    button_label = f"▸ {label}" if is_active else label
+    if st.sidebar.button(
+        button_label,
+        key=f"chat_{conversation['id']}",
+        use_container_width=True,
+    ):
+        switch_conversation(conversation["id"])
+        st.rerun()
+
+with st.sidebar.expander("Chat options"):
+    if st.button("Delete current chat", use_container_width=True):
+        current_id = st.session_state["active_conversation_id"]
+        delete_conversation(current_id)
+        remaining = list_conversations(limit=1)
+        next_id = (
+            remaining[0]["id"]
+            if remaining
+            else create_conversation()
+        )
+        switch_conversation(next_id)
+        st.rerun()
+
+
+# Render the selected conversation above the sticky composer.
+for message in st.session_state["chat_history"]:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+
+# Native Streamlit chat input stays pinned to the bottom of the viewport.
+question = st.chat_input("Ask Shipra AI...")
 
 if question:
+    conversation_id = st.session_state["active_conversation_id"]
+    had_messages = bool(st.session_state["chat_history"])
+
+    # Save/display the user message before generating the answer.
+    user_message = {"role": "user", "content": question}
+    st.session_state["chat_history"].append(user_message)
+    save_message(conversation_id, "user", question)
+
+    if not had_messages:
+        set_conversation_title(conversation_id, question)
+
     st.session_state.pop("pending_clarification_question", None)
 
-    with st.spinner("AI is preparing your answer..."):
-        answer, sources = ask_shipra_ai(question)
+    with st.chat_message("user"):
+        st.markdown(question)
 
-    st.session_state["chat_history"].append(
-        {"role": "user", "content": question}
-    )
-    st.session_state["chat_history"].append(
-        {"role": "assistant", "content": answer}
-    )
-    st.session_state["chat_history"] = (
-        st.session_state["chat_history"][-12:]
-    )
-
-    scenario_answer, code_answer = split_answer_sections(
-        answer
-    )
-    display_labels = get_display_labels(
-        get_response_language(question)
-    )
-
-    st.markdown("### AI Answer")
-
-    scenario_column, separator_column, code_column = st.columns(
-        [1, 0.03, 2]
-    )
-
-    with scenario_column:
-        st.markdown(f"#### {display_labels['scenario']}")
-
-        if scenario_answer:
-            st.markdown(scenario_answer)
-        else:
-            st.info(display_labels["no_scenario"])
-
-    with separator_column:
-        st.markdown(
-            """
-            <div style="
-                width: 1px;
-                min-height: 560px;
-                margin: 0 auto;
-                background: linear-gradient(
-                    to bottom,
-                    rgba(148, 163, 184, 0.10),
-                    rgba(148, 163, 184, 0.55),
-                    rgba(148, 163, 184, 0.10)
-                );
-            "></div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    with code_column:
-        st.markdown(f"#### {display_labels['code']}")
-
-        if code_answer:
-            st.markdown(code_answer)
-        else:
-            st.info(display_labels["no_code"])
-
-    if sources:
-        st.markdown(f"### {display_labels['sources']}")
-
-        for number, source in enumerate(sources, start=1):
-            details = []
-
-            if source.get("start_line") and source.get("end_line"):
-                details.append(
-                    f"lines {source['start_line']}-"
-                    f"{source['end_line']}"
+    with st.chat_message("assistant"):
+        with st.spinner("AI is preparing your answer..."):
+            try:
+                answer, sources = ask_shipra_ai(question)
+            except Exception as error:
+                # Keep the failed user turn, but do not persist a fake AI answer.
+                st.error(
+                    f"AI request failed: {type(error).__name__}: {error}"
                 )
+                st.stop()
 
-            details.append(f"Chunk ID: {source['chunk_id']}")
+        st.markdown(answer)
 
-            st.write(
-                f"{number}. [{source['project'].upper()}] "
-                f"{source['file_path']} "
-                f"({', '.join(details)})"
-            )
+        if sources:
+            with st.expander("Sources"):
+                for number, source in enumerate(sources, start=1):
+                    details = []
+                    if source.get("start_line") and source.get("end_line"):
+                        details.append(
+                            f"lines {source['start_line']}-"
+                            f"{source['end_line']}"
+                        )
+                    details.append(
+                        f"Chunk ID: {source.get('chunk_id', 'n/a')}"
+                    )
+                    st.write(
+                        f"{number}. [{source['project'].upper()}] "
+                        f"{source['file_path']} "
+                        f"({', '.join(details)})"
+                    )
+
+    assistant_message = {"role": "assistant", "content": answer}
+    st.session_state["chat_history"].append(assistant_message)
+    save_message(conversation_id, "assistant", answer)
+
+    # Rerun so the sidebar title/order and the full transcript refresh cleanly.
+    st.rerun()
+
