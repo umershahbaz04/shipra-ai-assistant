@@ -183,35 +183,81 @@ st.markdown(
     [data-testid="stSidebar"] .shipra-sidebar-brand {
         display: flex;
         align-items: center;
-        gap: 0.75rem;
-        padding: 0.25rem 0.25rem 0.9rem 0.25rem;
-        margin-bottom: 0.45rem;
+        gap: 0.85rem;
+        padding: 0.35rem 0.2rem 1.1rem 0.2rem;
+        margin-bottom: 0.35rem;
     }
 
     [data-testid="stSidebar"] .shipra-brand-mark {
-        width: 2.25rem;
-        height: 2.25rem;
-        border-radius: 0.7rem;
+        width: 2.65rem;
+        height: 2.65rem;
+        border-radius: 0.82rem;
         display: grid;
         place-items: center;
-        background: linear-gradient(135deg, #2a2a2a, #1a1a1a);
-        box-shadow: 0 8px 24px rgba(255, 255, 255, 0.08);
-        font-size: 1.05rem;
+        background:
+            linear-gradient(145deg, #303030 0%, #1c1c1c 100%);
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        box-shadow:
+            0 10px 30px rgba(0, 0, 0, 0.34),
+            inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        color: #f3f3f3;
+        font-size: 0.95rem;
+        font-weight: 800;
+        letter-spacing: -0.03em;
         flex: 0 0 auto;
     }
 
+    [data-testid="stSidebar"] .shipra-brand-copy {
+        min-width: 0;
+        flex: 1;
+    }
+
+    [data-testid="stSidebar"] .shipra-brand-kicker {
+        color: #7f7f7f;
+        font-size: 0.60rem;
+        font-weight: 750;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        margin-bottom: 0.22rem;
+    }
+
     [data-testid="stSidebar"] .shipra-brand-title {
-        color: #f5f5f5;
-        font-weight: 700;
-        font-size: 0.98rem;
-        line-height: 1.15;
-        letter-spacing: -0.01em;
+        color: #f4f4f4;
+        font-weight: 760;
+        font-size: 1.02rem;
+        line-height: 1.12;
+        letter-spacing: -0.02em;
+        white-space: nowrap;
     }
 
     [data-testid="stSidebar"] .shipra-brand-subtitle {
-        color: #9b9b9b;
-        font-size: 0.73rem;
-        margin-top: 0.16rem;
+        color: #929292;
+        font-size: 0.72rem;
+        line-height: 1.35;
+        margin-top: 0.25rem;
+    }
+
+    [data-testid="stSidebar"] .shipra-brand-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        margin-top: 0.48rem;
+        padding: 0.18rem 0.42rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.045);
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        color: #a7a7a7;
+        font-size: 0.61rem;
+        font-weight: 650;
+        letter-spacing: 0.02em;
+    }
+
+    [data-testid="stSidebar"] .shipra-brand-dot {
+        width: 0.38rem;
+        height: 0.38rem;
+        border-radius: 50%;
+        background: #bcbcbc;
+        box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
     }
 
     [data-testid="stSidebar"] .shipra-section-label {
@@ -470,10 +516,17 @@ st.markdown(
 st.sidebar.markdown(
     """
     <div class="shipra-sidebar-brand">
-        <div class="shipra-brand-mark">✦</div>
-        <div>
-            <div class="shipra-brand-title">Shipra AI Assistant</div>
-            <div class="shipra-brand-subtitle">Developer workspace</div>
+        <div class="shipra-brand-mark">SA</div>
+        <div class="shipra-brand-copy">
+            <div class="shipra-brand-kicker">Shipra Platform</div>
+            <div class="shipra-brand-title">Developer Assistant</div>
+            <div class="shipra-brand-subtitle">
+                Full-stack project intelligence
+            </div>
+            <div class="shipra-brand-badge">
+                <span class="shipra-brand-dot"></span>
+                Source-aware workspace
+            </div>
         </div>
     </div>
     """,
