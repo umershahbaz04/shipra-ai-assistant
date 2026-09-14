@@ -165,7 +165,13 @@ def find_mock_order(order_no: str) -> dict:
     }
 
 @mcp.tool()
-def search_mock_orders(labels: list[str] | None = None) -> dict:
+def search_mock_orders(
+    labels: list[str] | None = None,
+    payment_method: str | None = None,
+    status: str | None = None,
+    exclude_status: str | None = None,
+    carrier: str | None = None,
+) -> dict:
     path = PROJECT_ROOT / "mock-data" / "orders.json"
 
     if not path.is_file():
@@ -188,12 +194,55 @@ def search_mock_orders(labels: list[str] | None = None) -> dict:
             )
         ]
 
+    if payment_method:
+        wanted_payment = payment_method.casefold()
+
+        data = [
+            order
+            for order in data
+            if str(
+                order.get("paymentMethod", "")
+            ).casefold() == wanted_payment
+        ]
+
+    if status:
+        wanted_status = status.casefold()
+
+        data = [
+            order
+            for order in data
+            if str(
+                order.get("orderStatus", "")
+            ).casefold() == wanted_status
+        ]
+
+    if exclude_status:
+        blocked_status = exclude_status.casefold()
+
+        data = [
+            order
+            for order in data
+            if str(
+                order.get("orderStatus", "")
+            ).casefold() != blocked_status
+        ]
+
+    if carrier:
+        wanted_carrier = carrier.casefold()
+
+        data = [
+            order
+            for order in data
+            if str(
+                order.get("carrier", "")
+            ).casefold() == wanted_carrier
+        ]
+
     return {
         "status": "ok",
         "file_path": "mock-data/orders.json",
         "orders": data,
     }
-    
 
 @mcp.tool()
 def get_project_structure() -> dict:
