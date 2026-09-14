@@ -2588,6 +2588,165 @@ Finish when sufficient evidence is collected or the search is exhausted.
         get_mcp_seed_queries(question, search_results),
     )
 
+
+def answer_from_mock_data(question, results, response_language):
+    """Return a deterministic answer for explicit mock-data lookups."""
+    records_by_order = {}
+
+    for result in results:
+        if result.get("source_type") != "mock_data":
+            continue
+
+        raw = str(result.get("text", "")).strip()
+        if not raw:
+            continue
+
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+
+        if isinstance(parsed, dict):
+            parsed = [parsed]
+
+        if not isinstance(parsed, list):
+            continue
+
+        for item in parsed:
+            if not isinstance(item, dict):
+                continue
+            order_no = str(item.get("orderNo", "")).strip()
+            if order_no:
+                records_by_order[order_no] = item
+
+    if not records_by_order:
+        return None
+
+    records = list(records_by_order.values())
+    lowered = question.lower()
+
+    requested_order_ids = {
+        value.upper()
+        for value in re.findall(r"\bORD-\d+\b", question, flags=re.IGNORECASE)
+    }
+
+    all_label_names = []
+    for record in records:
+        for label in record.get("labels") or []:
+            if isinstance(label, dict):
+                name = str(label.get("labelName", "")).strip()
+                if name and name.casefold() not in {x.casefold() for x in all_label_names}:
+                    all_label_names.append(name)
+
+    requested_labels = [
+        label_name
+        for label_name in all_label_names
+        if re.search(r"\b" + re.escape(label_name) + r"\b", question, flags=re.IGNORECASE)
+    ]
+
+    selected = records
+    selection_reason = None
+
+    if requested_order_ids:
+        selected = [
+            record for record in records
+            if str(record.get("orderNo", "")).upper() in requested_order_ids
+        ]
+        selection_reason = "order_id"
+    elif requested_labels:
+        wanted = {name.casefold() for name in requested_labels}
+        selected = []
+        for record in records:
+            record_labels = {
+                str(label.get("labelName", "")).casefold()
+                for label in (record.get("labels") or [])
+                if isinstance(label, dict)
+            }
+            if record_labels.intersection(wanted):
+                selected.append(record)
+        selection_reason = "labels"
+    else:
+        # Only short-circuit when the question is clearly asking about mock/test data.
+        if not any(term in lowered for term in ("mock", "sample", "test data", "orders.json")):
+            return None
+        selection_reason = "all"
+
+    if response_language == "Roman Urdu":
+        if not selected:
+            return (
+                "### Practical Scenario Guide\n"
+                "Mock data check ki gayi, lekin requested record/label ka match nahi mila.\n\n"
+                "### Actual Project Code Flow\n"
+                "Ye code-flow question nahi hai; result verified mock data se liya gaya hai."
+            )
+
+        if selection_reason == "labels":
+            target = " ya ".join(requested_labels)
+            intro = f"Verified mock data mein {target} label wale orders ye hain:"
+        elif selection_reason == "order_id":
+            intro = "Requested order verified mock data mein mil gaya:"
+        else:
+            intro = "Verified mock data mein ye orders maujud hain:"
+
+        lines = []
+        for record in selected:
+            labels = ", ".join(
+                str(label.get("labelName", ""))
+                for label in (record.get("labels") or [])
+                if isinstance(label, dict) and label.get("labelName")
+            ) or "None"
+            lines.append(
+                f"- **{record.get('orderNo', 'Unknown')}** — "
+                f"Customer: {record.get('customerName', 'N/A')}; "
+                f"Status: {record.get('orderStatus', 'N/A')}; "
+                f"Labels: {labels}"
+            )
+
+        return (
+            "### Practical Scenario Guide\n"
+            f"{intro}\n\n" + "\n".join(lines) +
+            "\n\n### Actual Project Code Flow\n"
+            "Is sawal ka jawab application implementation se nahi, "
+            "`project-source/mock-data/orders.json` ke verified mock records se directly nikala gaya hai."
+        )
+
+    if not selected:
+        return (
+            "### Practical Scenario Guide\n"
+            "The mock data was checked, but no matching record or label was found.\n\n"
+            "### Actual Project Code Flow\n"
+            "This is a data lookup rather than a code-flow question; the result comes from verified mock data."
+        )
+
+    if selection_reason == "labels":
+        intro = "The following orders have " + " or ".join(requested_labels) + " labels:"
+    elif selection_reason == "order_id":
+        intro = "The requested order was found in the verified mock data:"
+    else:
+        intro = "The following orders are present in the verified mock data:"
+
+    lines = []
+    for record in selected:
+        labels = ", ".join(
+            str(label.get("labelName", ""))
+            for label in (record.get("labels") or [])
+            if isinstance(label, dict) and label.get("labelName")
+        ) or "None"
+        lines.append(
+            f"- **{record.get('orderNo', 'Unknown')}** — "
+            f"Customer: {record.get('customerName', 'N/A')}; "
+            f"Status: {record.get('orderStatus', 'N/A')}; "
+            f"Labels: {labels}"
+        )
+
+    return (
+        "### Practical Scenario Guide\n"
+        f"{intro}\n\n" + "\n".join(lines) +
+        "\n\n### Actual Project Code Flow\n"
+        "This answer is taken directly from the verified mock records in "
+        "`project-source/mock-data/orders.json`, not inferred from application code."
+    )
+
 def ask_shipra_project_ai(question, intent):
     response_language = get_response_language(question)
     code_explanation_heading = (
@@ -2671,6 +2830,17 @@ def ask_shipra_project_ai(question, intent):
         st.caption(
             "No additional MCP source sections were collected."
         )
+
+    mock_answer = answer_from_mock_data(
+        question,
+        results,
+        response_language,
+    )
+    if mock_answer is not None:
+        return mock_answer, [
+            item for item in results
+            if item.get("source_type") == "mock_data"
+        ]
 
     context = build_context(results, search_question)
     code_cards = build_code_cards(results, search_question)
