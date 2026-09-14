@@ -2589,6 +2589,70 @@ Finish when sufficient evidence is collected or the search is exhausted.
     )
 
 
+def extract_json_objects_from_text(raw_text):
+    """Extract complete JSON objects from a full or partial JSON text window."""
+    raw_text = str(raw_text or "")
+    objects = []
+    start = None
+    depth = 0
+    in_string = False
+    escape = False
+
+    for index, char in enumerate(raw_text):
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+            continue
+
+        if char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+            continue
+
+        if char == "}" and depth > 0:
+            depth -= 1
+            if depth == 0 and start is not None:
+                fragment = raw_text[start:index + 1]
+                try:
+                    value = json.loads(fragment)
+                except json.JSONDecodeError:
+                    start = None
+                    continue
+                if isinstance(value, dict):
+                    objects.append(value)
+                start = None
+
+    return objects
+
+
+def _flatten_mock_order_candidates(value):
+    """Return dictionaries that look like order records from parsed mock JSON."""
+    found = []
+
+    def visit(item):
+        if isinstance(item, dict):
+            if item.get("orderNo"):
+                found.append(item)
+                return
+            for child in item.values():
+                visit(child)
+        elif isinstance(item, list):
+            for child in item:
+                visit(child)
+
+    visit(value)
+    return found
+
+
 def answer_from_mock_data(question, results, response_language):
     """Return a deterministic answer for explicit mock-data lookups."""
     records_by_order = {}
@@ -2601,23 +2665,20 @@ def answer_from_mock_data(question, results, response_language):
         if not raw:
             continue
 
+        parsed_values = []
+
         try:
-            parsed = json.loads(raw)
+            parsed_values.append(json.loads(raw))
         except json.JSONDecodeError:
-            continue
+            # MCP may return only a line window from orders.json. Extract every
+            # complete JSON object in that window rather than discarding it.
+            parsed_values.extend(extract_json_objects_from_text(raw))
 
-        if isinstance(parsed, dict):
-            parsed = [parsed]
-
-        if not isinstance(parsed, list):
-            continue
-
-        for item in parsed:
-            if not isinstance(item, dict):
-                continue
-            order_no = str(item.get("orderNo", "")).strip()
-            if order_no:
-                records_by_order[order_no] = item
+        for parsed in parsed_values:
+            for item in _flatten_mock_order_candidates(parsed):
+                order_no = str(item.get("orderNo", "")).strip()
+                if order_no:
+                    records_by_order[order_no] = item
 
     if not records_by_order:
         return None
@@ -2666,8 +2727,13 @@ def answer_from_mock_data(question, results, response_language):
                 selected.append(record)
         selection_reason = "labels"
     else:
-        # Only short-circuit when the question is clearly asking about mock/test data.
-        if not any(term in lowered for term in ("mock", "sample", "test data", "orders.json")):
+        # For broad order-data questions, only short-circuit when the wording
+        # clearly asks about records/data rather than application implementation.
+        data_lookup_terms = {
+            "order", "orders", "label", "labels", "status", "carrier",
+            "tracking", "cod", "prepaid", "mock", "sample", "data",
+        }
+        if not tokenize(question).intersection(data_lookup_terms):
             return None
         selection_reason = "all"
 
