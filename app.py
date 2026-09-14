@@ -2858,163 +2858,315 @@ def _flatten_mock_order_candidates(value):
 
 
 def answer_from_mock_data(question, results, response_language):
-    """Return a deterministic answer for explicit mock-data lookups."""
-    records_by_order = {}
+    """Answer deterministic mock-order lookups directly from verified mock evidence."""
+    mock_results = [
+        result
+        for result in results
+        if result.get("source_type") == "mock_data"
+    ]
 
-    for result in results:
-        if result.get("source_type") != "mock_data":
-            continue
-
-        raw = str(result.get("text", "")).strip()
-        if not raw:
-            continue
-
-        parsed_values = []
-
-        try:
-            parsed_values.append(json.loads(raw))
-        except json.JSONDecodeError:
-            # MCP may return only a line window from orders.json. Extract every
-            # complete JSON object in that window rather than discarding it.
-            parsed_values.extend(extract_json_objects_from_text(raw))
-
-        for parsed in parsed_values:
-            for item in _flatten_mock_order_candidates(parsed):
-                order_no = str(item.get("orderNo", "")).strip()
-                if order_no:
-                    records_by_order[order_no] = item
-
-    if not records_by_order:
+    if not mock_results:
         return None
 
-    records = list(records_by_order.values())
-    lowered = question.lower()
+    records = []
+
+    for result in mock_results:
+        raw_text = str(result.get("text", "")).strip()
+        if not raw_text:
+            continue
+
+        parsed = None
+
+        try:
+            parsed = json.loads(raw_text)
+        except json.JSONDecodeError:
+            parsed = parse_json_object(raw_text)
+
+        if isinstance(parsed, list):
+            records.extend(
+                item for item in parsed
+                if isinstance(item, dict)
+            )
+        elif isinstance(parsed, dict):
+            if isinstance(parsed.get("orders"), list):
+                records.extend(
+                    item for item in parsed["orders"]
+                    if isinstance(item, dict)
+                )
+            elif isinstance(parsed.get("matches"), list):
+                records.extend(
+                    item for item in parsed["matches"]
+                    if isinstance(item, dict)
+                )
+            elif parsed.get("orderNo"):
+                records.append(parsed)
+
+    if not records:
+        return None
+
+    # De-duplicate by order number so filtered and unfiltered MCP evidence cannot
+    # cause the same order to appear multiple times.
+    deduped = {}
+    anonymous_records = []
+
+    for record in records:
+        order_no = str(record.get("orderNo", "")).strip()
+        if order_no:
+            deduped[order_no.upper()] = record
+        else:
+            anonymous_records.append(record)
+
+    records = list(deduped.values()) + anonymous_records
+
+    lowered_question = question.lower()
 
     requested_order_ids = {
         value.upper()
-        for value in re.findall(r"\bORD-\d+\b", question, flags=re.IGNORECASE)
+        for value in re.findall(
+            r"\bORD-\d+\b",
+            question,
+            flags=re.IGNORECASE,
+        )
     }
 
     all_label_names = []
     for record in records:
         for label in record.get("labels") or []:
-            if isinstance(label, dict):
-                name = str(label.get("labelName", "")).strip()
-                if name and name.casefold() not in {x.casefold() for x in all_label_names}:
-                    all_label_names.append(name)
+            if not isinstance(label, dict):
+                continue
+
+            name = str(label.get("labelName", "")).strip()
+
+            if (
+                name
+                and name.casefold()
+                not in {existing.casefold() for existing in all_label_names}
+            ):
+                all_label_names.append(name)
 
     requested_labels = [
         label_name
         for label_name in all_label_names
-        if re.search(r"\b" + re.escape(label_name) + r"\b", question, flags=re.IGNORECASE)
+        if re.search(
+            r"\b" + re.escape(label_name) + r"\b",
+            question,
+            flags=re.IGNORECASE,
+        )
     ]
 
-    selected = records
-    selection_reason = None
+    payment_method = None
+    if re.search(r"\bcod\b", lowered_question):
+        payment_method = "COD"
+    elif re.search(r"\bprepaid\b", lowered_question):
+        payment_method = "Prepaid"
+
+    status = None
+    exclude_status = None
+
+    if "not delivered" in lowered_question:
+        exclude_status = "Delivered"
+    elif re.search(r"\bdelivered\b", lowered_question):
+        status = "Delivered"
+
+    carrier = None
+    known_carriers = {
+        str(record.get("carrier", "")).strip()
+        for record in records
+        if str(record.get("carrier", "")).strip()
+    }
+
+    for carrier_name in sorted(known_carriers, key=len, reverse=True):
+        if carrier_name.casefold() in lowered_question.casefold():
+            carrier = carrier_name
+            break
+
+    selected = list(records)
+    selection_reasons = []
 
     if requested_order_ids:
         selected = [
-            record for record in records
-            if str(record.get("orderNo", "")).upper() in requested_order_ids
+            record
+            for record in selected
+            if str(record.get("orderNo", "")).upper()
+            in requested_order_ids
         ]
-        selection_reason = "order_id"
-    elif requested_labels:
-        wanted = {name.casefold() for name in requested_labels}
-        selected = []
-        for record in records:
-            record_labels = {
+        selection_reasons.append("order_id")
+
+    if requested_labels:
+        wanted_labels = {
+            name.casefold()
+            for name in requested_labels
+        }
+
+        selected = [
+            record
+            for record in selected
+            if {
                 str(label.get("labelName", "")).casefold()
                 for label in (record.get("labels") or [])
                 if isinstance(label, dict)
-            }
-            if record_labels.intersection(wanted):
-                selected.append(record)
-        selection_reason = "labels"
-    else:
-        # For broad order-data questions, only short-circuit when the wording
-        # clearly asks about records/data rather than application implementation.
-        data_lookup_terms = {
-            "order", "orders", "label", "labels", "status", "carrier",
-            "tracking", "cod", "prepaid", "mock", "sample", "data",
-        }
-        if not tokenize(question).intersection(data_lookup_terms):
-            return None
-        selection_reason = "all"
+            }.intersection(wanted_labels)
+        ]
+        selection_reasons.append("labels")
+
+    if payment_method:
+        selected = [
+            record
+            for record in selected
+            if str(
+                record.get("paymentMethod", "")
+            ).casefold() == payment_method.casefold()
+        ]
+        selection_reasons.append("payment_method")
+
+    if status:
+        selected = [
+            record
+            for record in selected
+            if str(
+                record.get("orderStatus", "")
+            ).casefold() == status.casefold()
+        ]
+        selection_reasons.append("status")
+
+    if exclude_status:
+        selected = [
+            record
+            for record in selected
+            if str(
+                record.get("orderStatus", "")
+            ).casefold() != exclude_status.casefold()
+        ]
+        selection_reasons.append("exclude_status")
+
+    if carrier:
+        selected = [
+            record
+            for record in selected
+            if str(
+                record.get("carrier", "")
+            ).casefold() == carrier.casefold()
+        ]
+        selection_reasons.append("carrier")
+
+    # Only use the direct mock-data answer for clear data lookup questions.
+    data_lookup_terms = {
+        "order", "orders", "label", "labels", "status",
+        "carrier", "tracking", "cod", "prepaid", "payment",
+        "mock", "sample", "data", "delivered",
+    }
+
+    if (
+        not requested_order_ids
+        and not requested_labels
+        and not selection_reasons
+        and not tokenize(question).intersection(data_lookup_terms)
+    ):
+        return None
 
     if response_language == "Roman Urdu":
         if not selected:
             return (
                 "### Practical Scenario Guide\n"
-                "Mock data check ki gayi, lekin requested record/label ka match nahi mila.\n\n"
+                "Verified mock data check ki gayi, lekin requested filters ke "
+                "mutabiq koi matching order nahi mila.\n\n"
                 "### Actual Project Code Flow\n"
-                "Ye code-flow question nahi hai; result verified mock data se liya gaya hai."
+                "Ye code-flow question nahi hai; result verified mock data se "
+                "directly nikala gaya hai."
             )
 
-        if selection_reason == "labels":
-            target = " ya ".join(requested_labels)
-            intro = f"Verified mock data mein {target} label wale orders ye hain:"
-        elif selection_reason == "order_id":
+        if requested_labels:
+            intro = (
+                "Verified mock data mein "
+                + " ya ".join(requested_labels)
+                + " label wale matching orders ye hain:"
+            )
+        elif payment_method and exclude_status:
+            intro = (
+                f"Verified mock data mein {payment_method} aur "
+                f"{exclude_status} na honay wale matching orders ye hain:"
+            )
+        elif requested_order_ids:
             intro = "Requested order verified mock data mein mil gaya:"
         else:
-            intro = "Verified mock data mein ye orders maujud hain:"
+            intro = "Verified mock data ke matching orders ye hain:"
 
-        lines = []
-        for record in selected:
-            labels = ", ".join(
-                str(label.get("labelName", ""))
-                for label in (record.get("labels") or [])
-                if isinstance(label, dict) and label.get("labelName")
-            ) or "None"
-            lines.append(
-                f"- **{record.get('orderNo', 'Unknown')}** — "
-                f"Customer: {record.get('customerName', 'N/A')}; "
-                f"Status: {record.get('orderStatus', 'N/A')}; "
-                f"Labels: {labels}"
+    else:
+        if not selected:
+            return (
+                "### Practical Scenario Guide\n"
+                "The verified mock data was checked, but no order matched "
+                "the requested filters.\n\n"
+                "### Actual Project Code Flow\n"
+                "This is a data lookup rather than a code-flow question; "
+                "the result comes directly from verified mock data."
             )
 
-        return (
-            "### Practical Scenario Guide\n"
-            f"{intro}\n\n" + "\n".join(lines) +
-            "\n\n### Actual Project Code Flow\n"
-            "Is sawal ka jawab application implementation se nahi, "
-            "`project-source/mock-data/orders.json` ke verified mock records se directly nikala gaya hai."
-        )
-
-    if not selected:
-        return (
-            "### Practical Scenario Guide\n"
-            "The mock data was checked, but no matching record or label was found.\n\n"
-            "### Actual Project Code Flow\n"
-            "This is a data lookup rather than a code-flow question; the result comes from verified mock data."
-        )
-
-    if selection_reason == "labels":
-        intro = "The following orders have " + " or ".join(requested_labels) + " labels:"
-    elif selection_reason == "order_id":
-        intro = "The requested order was found in the verified mock data:"
-    else:
-        intro = "The following orders are present in the verified mock data:"
+        if requested_labels:
+            intro = (
+                "The following verified mock orders have "
+                + " or ".join(requested_labels)
+                + " labels:"
+            )
+        elif payment_method and exclude_status:
+            intro = (
+                f"The following verified mock orders use {payment_method} "
+                f"and are not {exclude_status}:"
+            )
+        elif requested_order_ids:
+            intro = "The requested order was found in the verified mock data:"
+        else:
+            intro = "The following verified mock orders match the request:"
 
     lines = []
+
     for record in selected:
         labels = ", ".join(
             str(label.get("labelName", ""))
             for label in (record.get("labels") or [])
-            if isinstance(label, dict) and label.get("labelName")
+            if isinstance(label, dict)
+            and label.get("labelName")
         ) or "None"
+
+        payment = str(
+            record.get("paymentMethod", "N/A")
+        )
+
+        carrier_value = record.get("carrier")
+        carrier_text = (
+            str(carrier_value)
+            if carrier_value
+            else "None"
+        )
+
         lines.append(
             f"- **{record.get('orderNo', 'Unknown')}** — "
             f"Customer: {record.get('customerName', 'N/A')}; "
             f"Status: {record.get('orderStatus', 'N/A')}; "
+            f"Payment: {payment}; "
+            f"Carrier: {carrier_text}; "
             f"Labels: {labels}"
+        )
+
+    if response_language == "Roman Urdu":
+        code_note = (
+            "Is sawal ka jawab application implementation se nahi, "
+            "`project-source/mock-data/orders.json` ke verified mock records "
+            "se directly filter karke nikala gaya hai."
+        )
+    else:
+        code_note = (
+            "This answer was filtered directly from the verified mock records "
+            "in `project-source/mock-data/orders.json`, not inferred from "
+            "application code."
         )
 
     return (
         "### Practical Scenario Guide\n"
-        f"{intro}\n\n" + "\n".join(lines) +
-        "\n\n### Actual Project Code Flow\n"
-        "This answer is taken directly from the verified mock records in "
-        "`project-source/mock-data/orders.json`, not inferred from application code."
+        f"{intro}\n\n"
+        + "\n".join(lines)
+        + "\n\n### Actual Project Code Flow\n"
+        + code_note
     )
 
 def ask_shipra_project_ai(question, intent):
