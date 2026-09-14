@@ -1125,6 +1125,40 @@ async def test_shipra_mcp():
             return [tool.name for tool in result.tools]
 
 
+async def debug_mcp_search_code(query="dashboard"):
+    """Temporary diagnostic helper to inspect the exact MCP search_code schema."""
+    server_params = get_mcp_server_params()
+
+    async with asyncio.timeout(30):
+        async with Client(server_params) as mcp_client:
+            result = await mcp_client.call_tool(
+                "search_code",
+                {
+                    "query": query,
+                    "max_results": 10,
+                },
+            )
+
+            text_blocks = []
+            for block in getattr(result, "content", []) or []:
+                if getattr(block, "type", "") == "text":
+                    text_blocks.append(
+                        getattr(block, "text", "")
+                    )
+
+            return {
+                "is_error": bool(
+                    getattr(result, "is_error", False)
+                ),
+                "structured_content": getattr(
+                    result,
+                    "structured_content",
+                    None,
+                ),
+                "text_content": text_blocks,
+            }
+
+
 st.sidebar.markdown(
     '<div class="shipra-section-label">Workspace</div>',
     unsafe_allow_html=True,
@@ -1158,6 +1192,39 @@ if st.sidebar.button(
         st.sidebar.error(
             f"MCP connection failed: {type(error).__name__}: {error}"
         )
+
+
+with st.sidebar.expander("MCP Debug"):
+    st.caption("Temporary diagnostic tool")
+
+    debug_query = st.text_input(
+        "search_code query",
+        value="dashboard",
+        key="mcp_debug_query",
+    )
+
+    if st.button(
+        "Run raw MCP search",
+        key="run_raw_mcp_search",
+        use_container_width=True,
+    ):
+        try:
+            with st.spinner("Running raw MCP search_code..."):
+                debug_result = asyncio.run(
+                    debug_mcp_search_code(
+                        debug_query.strip() or "dashboard"
+                    )
+                )
+
+            st.write("Raw MCP response:")
+            st.json(debug_result)
+
+        except Exception as debug_error:
+            st.error(
+                "Debug MCP search failed: "
+                f"{type(debug_error).__name__}: "
+                f"{debug_error}"
+            )
 
 
 STOP_WORDS = {
