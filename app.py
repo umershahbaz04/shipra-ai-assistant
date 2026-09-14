@@ -1927,11 +1927,23 @@ You collect source evidence for a Shipra project question.
 Do not answer the user yet.
 
 Return exactly one JSON object per turn, without Markdown:
+
+{"tool": "find_mock_order", "arguments": {"order_no": "ORD-1001"}}
+or
 {"tool": "search_code", "arguments": {"query": "identifier", "max_results": 30}}
 or
 {"tool": "read_file", "arguments": {"file_path": "returned/path", "start_line": 1, "end_line": 120}}
 or
+{"tool": "find_symbol", "arguments": {"symbol_name": "identifier"}}
+or
+{"tool": "find_references", "arguments": {"symbol_name": "identifier"}}
+or
+{"tool": "trace_call_chain", "arguments": {"entry_symbol": "identifier"}}
+or
 {"tool": "finish", "arguments": {}}
+
+If the user asks for an exact mock order number such as ORD-1001,
+use find_mock_order before searching ordinary project code.
 
 Search uses literal text, not semantic search. Start with a concise feature
 identifier or likely code name. Try a different term if no matches appear.
@@ -2225,8 +2237,17 @@ Finish when sufficient evidence is collected or the search is exhausted.
                     "file_path": pending_path,
                 })
 
-            if tool not in {"search_code", "read_file"}:
-                raise ValueError("Unsupported MCP tool")
+            allowed_tools = {
+    "search_code",
+    "read_file",
+    "find_mock_order",
+    "find_symbol",
+    "find_references",
+    "trace_call_chain",
+}
+
+if tool not in allowed_tools:
+    raise ValueError("Unsupported MCP tool")
 
             if not isinstance(arguments, dict):
                 raise ValueError("Invalid MCP tool arguments")
