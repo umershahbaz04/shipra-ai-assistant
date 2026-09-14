@@ -508,6 +508,66 @@ st.markdown(
             padding: 1.45rem;
         }
     }
+    /* Unified premium graphite shell */
+    html,
+    body,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"] {
+        background: #18191b !important;
+    }
+
+    [data-testid="stHeader"] {
+        background: #18191b !important;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.055) !important;
+        box-shadow: none !important;
+    }
+
+    [data-testid="stToolbar"] {
+        background: transparent !important;
+    }
+
+    [data-testid="stMainBlockContainer"] {
+        background:
+            radial-gradient(circle at 50% 24%, rgba(255,255,255,0.035), transparent 31%),
+            linear-gradient(180deg, #1d1e20 0%, #18191b 48%, #17181a 100%) !important;
+        border-left: 1px solid rgba(255,255,255,0.025);
+    }
+
+    [data-testid="stAppViewBlockContainer"] {
+        background: transparent !important;
+    }
+
+    .shipra-simple-title-wrap {
+        margin-top: 5.2rem;
+        padding: 3.2rem 1.5rem;
+        border-radius: 1.35rem;
+        background: rgba(255,255,255,0.018);
+        border: 1px solid rgba(255,255,255,0.055);
+        box-shadow:
+            0 28px 80px rgba(0,0,0,0.20),
+            inset 0 1px 0 rgba(255,255,255,0.025);
+    }
+
+    .shipra-simple-title {
+        color: #f4f4f5 !important;
+        text-shadow: 0 1px 18px rgba(255,255,255,0.025);
+    }
+
+    [data-testid="stBottomBlockContainer"] {
+        background: linear-gradient(
+            180deg,
+            rgba(24,25,27,0) 0%,
+            rgba(24,25,27,0.96) 30%,
+            #18191b 100%
+        ) !important;
+    }
+
+    [data-testid="stChatInput"] {
+        background: #252629 !important;
+        border: 1px solid rgba(255,255,255,0.09) !important;
+        box-shadow: 0 16px 45px rgba(0,0,0,0.24) !important;
+    }
+
     </style>
     """,
     unsafe_allow_html=True,
@@ -519,9 +579,9 @@ st.sidebar.markdown(
         <div class="shipra-brand-mark">SA</div>
         <div class="shipra-brand-copy">
             <div class="shipra-brand-kicker">Shipra Platform</div>
-            <div class="shipra-brand-title">Developer Assistant</div>
+            <div class="shipra-brand-title">Shipra Intelligence</div>
             <div class="shipra-brand-subtitle">
-                Full-stack project intelligence
+                AI-powered engineering workspace
             </div>
             <div class="shipra-brand-badge">
                 <span class="shipra-brand-dot"></span>
