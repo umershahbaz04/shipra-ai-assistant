@@ -4098,6 +4098,64 @@ def answer_from_mock_data(question, results, response_language):
     )
 
 
+
+def build_entity_only_query(question):
+    """Remove action words so MCP can verify the underlying feature/entity."""
+    lowered = str(question or "").strip()
+
+    action_patterns = [
+        r"\bhow\s+to\b",
+        r"\bhow\s+do\s+i\b",
+        r"\bhow\s+can\s+i\b",
+        r"\bcreate\b",
+        r"\bcreating\b",
+        r"\bmake\b",
+        r"\badd\b",
+        r"\bassign\b",
+        r"\bconnect\b",
+        r"\bactivate\b",
+        r"\bupdate\b",
+        r"\bedit\b",
+        r"\bchange\b",
+        r"\bdelete\b",
+        r"\bremove\b",
+        r"\bfilter\b",
+        r"\bsearch\b",
+        r"\bexport\b",
+        r"\bdownload\b",
+        r"\bvalidate\b",
+        r"\bvalidation\b",
+        r"\bupload\b",
+        r"\bimport\b",
+        r"\bsync\b",
+        r"\breturn\b",
+        r"\bbanau\b",
+        r"\bbanao\b",
+        r"\bkesy\b",
+        r"\bkaise\b",
+        r"\bshipra\s+mai\b",
+        r"\bin\s+shipra\b",
+    ]
+
+    entity_query = lowered
+
+    for pattern in action_patterns:
+        entity_query = re.sub(
+            pattern,
+            " ",
+            entity_query,
+            flags=re.IGNORECASE,
+        )
+
+    entity_query = re.sub(
+        r"\s+",
+        " ",
+        entity_query,
+    ).strip(" ?.,:-")
+
+    return entity_query
+
+
 def build_verified_evidence_gap_answer(question):
     response_language = get_response_language(question)
 
@@ -4192,10 +4250,47 @@ def ask_shipra_project_ai(question, intent):
     # Final factual evidence is MCP-read evidence only.
     results = mcp_results
 
+    partial_entity_evidence = False
+
+    if not results:
+        # Exact requested operation was not verified. Try to verify only the
+        # underlying entity/feature before returning a full evidence gap.
+        entity_query = build_entity_only_query(question)
+
+        if entity_query and entity_query.lower() != question.strip().lower():
+            entity_rag_candidates = search_documentation(
+                entity_query,
+                top_k=12,
+            )
+            entity_rag_candidates = filter_relevant_results(
+                entity_rag_candidates,
+                entity_query,
+            )
+
+            try:
+                entity_results = asyncio.run(
+                    collect_mcp_evidence(
+                        entity_query,
+                        "",
+                        entity_rag_candidates,
+                    )
+                )
+            except Exception:
+                entity_results = []
+
+            if entity_results:
+                results = entity_results
+                partial_entity_evidence = True
+
     if results:
-        st.caption(
-            f"MCP verified evidence: {len(results)} source sections."
-        )
+        if partial_entity_evidence:
+            st.caption(
+                f"MCP partial evidence: {len(results)} verified source sections."
+            )
+        else:
+            st.caption(
+                f"MCP verified evidence: {len(results)} source sections."
+            )
     else:
         st.caption("No verified MCP source evidence was collected.")
 
@@ -4234,6 +4329,12 @@ def ask_shipra_project_ai(question, intent):
         ]
 
     context = build_context(results, search_question)
+
+    verification_scope = (
+        "PARTIAL_ENTITY_ONLY"
+        if partial_entity_evidence
+        else "EXACT_REQUEST"
+    )
     code_cards = build_code_cards(results, search_question)
     # Never append unexplained fallback snippets. The model places a small
     # number of verified code markers inside already-explained steps.
@@ -4247,6 +4348,14 @@ Write explanations in that language; preserve technical identifiers.
 
 ACCURACY CONTRACT:
 - The supplied context contains MCP-verified source evidence.
+- Verification scope: {verification_scope}.
+- If verification scope is PARTIAL_ENTITY_ONLY, the underlying feature/entity
+  was verified but the user's requested operation was not.
+- In PARTIAL_ENTITY_ONLY mode:
+  * explain the verified existing entity/page/component behavior;
+  * explicitly state that the requested action/operation was not verified;
+  * do not convert entity existence into proof that the requested operation exists;
+  * do not invent usage steps for the missing operation.
 - Treat only that verified evidence as factual project truth.
 - Accuracy is more important than completeness.
 - Never turn semantic similarity into a project fact.
@@ -4455,6 +4564,9 @@ Rules:
 - Do not derive UI steps from backend-only evidence.
 - The requested entity and requested operation must both match the verified frontend code.
 - If the existing screen controls were not verified, say that instead of inventing steps.
+- If verification scope is PARTIAL_ENTITY_ONLY, do not write a normal step-by-step
+  workflow for the requested action. Instead summarize what existing feature/page
+  was verified and identify the missing action evidence.
 - End with one short Expected Result line.
 
 Use project sources only to make the steps accurate.
