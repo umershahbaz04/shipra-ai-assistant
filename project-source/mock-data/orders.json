@@ -1,0 +1,94 @@
+[
+  {
+    "orderNo": "ORD-1001",
+    "customerName": "Ali Raza",
+    "customerPhone": "03001234567",
+    "deliveryAddress": {
+      "city": "Karachi",
+      "area": "Gulshan-e-Iqbal",
+      "addressLine": "Block 13-D, House 24"
+    },
+    "paymentMethod": "COD",
+    "orderAmount": 4250,
+    "deliveryCharges": 250,
+    "orderStatus": "ReadyForAssignment",
+    "fulfillmentStatus": "Packed",
+    "carrier": null,
+    "trackingNo": null,
+    "labels": [
+      {
+        "labelName": "Priority",
+        "colorCode": "#FF5733"
+      }
+    ],
+    "items": [
+      {
+        "sku": "TSHIRT-BLK-M",
+        "productName": "Black T-Shirt",
+        "quantity": 2,
+        "unitPrice": 2000
+      }
+    ]
+  },
+  {
+    "orderNo": "ORD-1002",
+    "customerName": "Sara Khan",
+    "customerPhone": "03111234567",
+    "deliveryAddress": {
+      "city": "Lahore",
+      "area": "DHA Phase 5",
+      "addressLine": "House 18, Street 7"
+    },
+    "paymentMethod": "Prepaid",
+    "orderAmount": 6200,
+    "deliveryCharges": 0,
+    "orderStatus": "Assigned",
+    "fulfillmentStatus": "ReadyToShip",
+    "carrier": "Leopards",
+    "trackingNo": "LP-778899",
+    "labels": [
+      {
+        "labelName": "VIP",
+        "colorCode": "#2E86C1"
+      },
+      {
+        "labelName": "Fragile",
+        "colorCode": "#F4D03F"
+      }
+    ],
+    "items": [
+      {
+        "sku": "SHOES-WHT-39",
+        "productName": "White Sneakers",
+        "quantity": 1,
+        "unitPrice": 6200
+      }
+    ]
+  },
+  {
+    "orderNo": "ORD-1003",
+    "customerName": "Usman Tariq",
+    "customerPhone": "03221234567",
+    "deliveryAddress": {
+      "city": "Islamabad",
+      "area": "F-10",
+      "addressLine": "Street 20, House 11"
+    },
+    "paymentMethod": "COD",
+    "orderAmount": 3100,
+    "deliveryCharges": 200,
+    "orderStatus": "Delivered",
+    "fulfillmentStatus": "Fulfilled",
+    "carrier": "TCS",
+    "trackingNo": "TCS-553311",
+    "labels": [],
+    "items": [
+      {
+        "sku": "BAG-BRN-01",
+        "productName": "Brown Handbag",
+        "quantity": 1,
+        "unitPrice": 2900
+      }
+    ]
+  }
+]
