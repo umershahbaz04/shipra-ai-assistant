@@ -2253,48 +2253,109 @@ if tool not in allowed_tools:
                 raise ValueError("Invalid MCP tool arguments")
 
             if tool == "search_code":
-                query = str(arguments.get("query", "")).strip()
-                if len(query) < 3:
-                    raise ValueError("MCP search term is too short")
-                arguments = {"query": query, "max_results": 30}
-            else:
-                requested_path = str(
-                    arguments.get("file_path", "")
-                ).strip()
+    query = str(arguments.get("query", "")).strip()
+    if len(query) < 3:
+        raise ValueError("MCP search term is too short")
+    arguments = {
+        "query": query,
+        "max_results": 30,
+    }
 
-                normalized_path = requested_path.replace("\\", "/")
+elif tool == "find_mock_order":
+    order_no = str(
+        arguments.get("order_no", "")
+    ).strip()
 
-                verified_paths = {
-                    item.replace("\\", "/"): item
-                    for item in known_paths
-                }
+    if not order_no:
+        raise ValueError("Mock order number is required")
 
-                path = verified_paths.get(normalized_path)
+    arguments = {
+        "order_no": order_no,
+    }
 
-                if path is None:
-                    transcript.append({
-                        "tool": "read_file",
-                        "status": "not_executed",
-                        "requested_path": requested_path,
-                        "message": (
-                            "This path has not been verified by search_code. "
-                            "Do not guess or reuse an indexed path directly. "
-                            "Search for the relevant class, function, or API "
-                            "identifier first. Then use the exact file_path "
-                            "returned by search_code. Keep repeated folders "
-                            "in the returned path unchanged."
-                        ),
-                        "verified_paths_so_far": sorted(known_paths),
-                    })
-                    continue
+elif tool == "find_symbol":
+    symbol_name = str(
+        arguments.get("symbol_name", "")
+    ).strip()
 
-                start = max(1, int(arguments.get("start_line", 1)))
-                end = int(arguments.get("end_line", start + 119))
-                arguments = {
-                    "file_path": path,
-                    "start_line": start,
-                    "end_line": min(max(start, end), start + 119),
-                }
+    if not symbol_name:
+        raise ValueError("Symbol name is required")
+
+    arguments = {
+        "symbol_name": symbol_name,
+    }
+
+elif tool == "find_references":
+    symbol_name = str(
+        arguments.get("symbol_name", "")
+    ).strip()
+
+    if not symbol_name:
+        raise ValueError("Symbol name is required")
+
+    arguments = {
+        "symbol_name": symbol_name,
+    }
+
+elif tool == "trace_call_chain":
+    entry_symbol = str(
+        arguments.get("entry_symbol", "")
+    ).strip()
+
+    if not entry_symbol:
+        raise ValueError("Entry symbol is required")
+
+    arguments = {
+        "entry_symbol": entry_symbol,
+    }
+
+elif tool == "read_file":
+    requested_path = str(
+        arguments.get("file_path", "")
+    ).strip()
+
+    normalized_path = requested_path.replace("\\", "/")
+
+    verified_paths = {
+        item.replace("\\", "/"): item
+        for item in known_paths
+    }
+
+    path = verified_paths.get(normalized_path)
+
+    if path is None:
+        transcript.append({
+            "tool": "read_file",
+            "status": "not_executed",
+            "requested_path": requested_path,
+            "message": (
+                "This path has not been verified by search_code. "
+                "Search for the relevant identifier first."
+            ),
+            "verified_paths_so_far": sorted(known_paths),
+        })
+        continue
+
+    start = max(
+        1,
+        int(arguments.get("start_line", 1))
+    )
+
+    end = int(
+        arguments.get(
+            "end_line",
+            start + 119,
+        )
+    )
+
+    arguments = {
+        "file_path": path,
+        "start_line": start,
+        "end_line": min(
+            max(start, end),
+            start + 119,
+        ),
+    }
 
             call_key = tool + json.dumps(arguments, sort_keys=True)
             if call_key in completed_calls:
