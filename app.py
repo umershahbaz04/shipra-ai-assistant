@@ -2075,11 +2075,36 @@ Finish when sufficient evidence is collected or the search is exhausted.
 
         if asks_for_order_records:
             try:
+                        payment_method = None
+        status = None
+        exclude_status = None
+        carrier = None
+
+        if "cod" in lowered_question:
+            payment_method = "COD"
+        elif "prepaid" in lowered_question:
+            payment_method = "Prepaid"
+
+        if "not delivered" in lowered_question:
+            exclude_status = "Delivered"
+        elif "delivered" in lowered_question:
+            status = "Delivered"
+
+        for carrier_name in ("TCS", "Leopards"):
+            if carrier_name.lower() in lowered_question:
+                carrier = carrier_name
+                break
                 # Fetch the full small mock dataset structurally. The deterministic
                 # answer layer below performs the requested label/status/etc. selection.
                 mock_search_result = await mcp_client.call_tool(
-                    "search_mock_orders",
-                    {"labels": None},
+                   "search_mock_orders",
+                  {
+                      "labels": None,
+                      "payment_method": payment_method,
+                      "status": status,
+                      "exclude_status": exclude_status,
+                      "carrier": carrier,
+                  },
                 )
 
                 if not mock_search_result.is_error:
@@ -2497,6 +2522,7 @@ Finish when sufficient evidence is collected or the search is exhausted.
 
             elif tool == "search_mock_orders":
                 raw_labels = arguments.get("labels")
+
                 if raw_labels is None:
                     labels = None
                 elif isinstance(raw_labels, list):
@@ -2507,7 +2533,30 @@ Finish when sufficient evidence is collected or the search is exhausted.
                     ]
                 else:
                     labels = [str(raw_labels).strip()]
-                arguments = {"labels": labels}
+
+                payment_method = str(
+                    arguments.get("payment_method") or ""
+                ).strip() or None
+
+                status = str(
+                    arguments.get("status") or ""
+                ).strip() or None
+
+                exclude_status = str(
+                    arguments.get("exclude_status") or ""
+                ).strip() or None
+
+                carrier = str(
+                    arguments.get("carrier") or ""
+                ).strip() or None
+
+                arguments = {
+                    "labels": labels,
+                    "payment_method": payment_method,
+                    "status": status,
+                    "exclude_status": exclude_status,
+                    "carrier": carrier,
+                }
 
             elif tool == "find_symbol":
                 symbol_name = str(arguments.get("symbol_name", "")).strip()
