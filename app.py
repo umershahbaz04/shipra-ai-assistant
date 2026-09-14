@@ -596,6 +596,37 @@ st.markdown(
         background: #242528 !important;
     }
 
+    /* Pure black main workspace */
+    html,
+    body,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"],
+    [data-testid="stMainBlockContainer"],
+    [data-testid="stAppViewBlockContainer"] {
+        background: #000000 !important;
+        background-image: none !important;
+    }
+
+    [data-testid="stHeader"] {
+        background: #000000 !important;
+        border-bottom-color: rgba(255, 255, 255, 0.06) !important;
+    }
+
+    [data-testid="stToolbar"] {
+        background: transparent !important;
+    }
+
+    [data-testid="stBottomBlockContainer"] {
+        background: #000000 !important;
+        background-image: none !important;
+    }
+
+    .shipra-simple-title-wrap {
+        background: #000000 !important;
+        border-color: rgba(255, 255, 255, 0.07) !important;
+        box-shadow: none !important;
+    }
+
     </style>
     """,
     unsafe_allow_html=True,
