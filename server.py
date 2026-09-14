@@ -1,3 +1,4 @@
+import json
 from datetime import date
 import os
 import hmac
@@ -163,6 +164,36 @@ def find_mock_order(order_no: str) -> dict:
         "matches": matches,
     }
 
+@mcp.tool()
+def search_mock_orders(labels: list[str] | None = None) -> dict:
+    path = PROJECT_ROOT / "mock-data" / "orders.json"
+
+    if not path.is_file():
+        return {
+            "status": "error",
+            "message": "orders.json not found",
+        }
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+
+    if labels:
+        wanted = {label.casefold() for label in labels}
+
+        data = [
+            order
+            for order in data
+            if any(
+                str(label.get("labelName", "")).casefold() in wanted
+                for label in order.get("labels", [])
+            )
+        ]
+
+    return {
+        "status": "ok",
+        "file_path": "mock-data/orders.json",
+        "orders": data,
+    }
+    
 
 @mcp.tool()
 def get_project_structure() -> dict:
