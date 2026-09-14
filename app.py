@@ -2042,7 +2042,7 @@ Finish when sufficient evidence is collected or the search is exhausted.
             if part and (not cleaned or part != cleaned[-1]):
                 cleaned.append(part)
         return "/".join(cleaned)
-async with Client(params) as mcp_client:
+     async with Client(params) as mcp_client:
 
     lowered_question = question.lower()
 
