@@ -137,6 +137,32 @@ def get_order_status_summary(
         "counts": counts,
     }
 
+@mcp.tool()
+def find_mock_order(order_no: str) -> dict:
+    path = PROJECT_ROOT / "mock-data" / "orders.json"
+
+    if not path.is_file():
+        return {
+            "status": "error",
+            "message": f"Mock file not found: {path}",
+        }
+
+    import json
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+
+    matches = [
+        order
+        for order in data
+        if order.get("orderNo") == order_no
+    ]
+
+    return {
+        "status": "ok",
+        "file_path": str(path),
+        "matches": matches,
+    }
+
 
 @mcp.tool()
 def get_project_structure() -> dict:
