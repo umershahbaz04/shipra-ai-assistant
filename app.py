@@ -2042,131 +2042,76 @@ Finish when sufficient evidence is collected or the search is exhausted.
             if part and (not cleaned or part != cleaned[-1]):
                 cleaned.append(part)
         return "/".join(cleaned)
-    async with Client(params) as mcp_client:
-        
-        # Deterministically resolve explicit mock order ids before generic code search.
-        # This prevents ORD-1001 style lookups from drifting into semantically similar UI code.
-        order_ids = re.findall(r"\bORD-\d+\b", question, flags=re.IGNORECASE)
-        for order_id in order_ids:
-            try:
-                mock_result = await mcp_client.call_tool(
-                    "find_mock_order",
-                    {"order_no": order_id.upper()},
-                )
+async with Client(params) as mcp_client:
 
-                if mock_result.is_error:
-                    continue
+    lowered_question = question.lower()
 
-                mock_payload = mock_result.structured_content
-                if not isinstance(mock_payload, dict):
+    requested_labels = [
+        label
+        for label in ("Priority", "VIP")
+        if label.lower() in lowered_question
+    ]
+
+    if requested_labels:
+        try:
+            mock_result = await mcp_client.call_tool(
+                "search_mock_orders",
+                {"labels": requested_labels},
+            )
+
+            if not mock_result.is_error:
+                payload = mock_result.structured_content
+
+                if not isinstance(payload, dict):
                     mock_text = "\n".join(
                         block.text
                         for block in mock_result.content
                         if getattr(block, "type", "") == "text"
                     )
-                    mock_payload = parse_json_object(mock_text)
+                    payload = parse_json_object(mock_text)
 
-                if isinstance(mock_payload, dict) and mock_payload.get("status") == "ok":
-                    matches = mock_payload.get("matches") or []
-                    if isinstance(matches, dict):
-                        matches = [matches]
+                if (
+                    isinstance(payload, dict)
+                    and payload.get("status") == "ok"
+                ):
+                    orders = payload.get("orders", [])
 
-                    if matches:
-                        evidence.append({
-                            "chunk_id": f"MCP-{len(evidence) + 1}",
-                            "distance": None,
-                            "project": "mock-data",
-                            "source_type": "mock_data",
-                            "file_path": mock_payload.get(
-                                "file_path",
-                                "mock-data/orders.json",
-                            ),
-                            "section": "Mock order lookup",
-                            "symbol": None,
-                            "implementation_status": "verified_mock_data",
-                            "frontend_reachable": None,
-                            "frontend_inbound_references": 0,
-                            "matched_identifiers": [
-                                str(item.get("orderNo", ""))
-                                for item in matches
-                                if isinstance(item, dict)
-                            ],
-                            "start_line": 1,
-                            "end_line": 1,
-                            "text": json.dumps(
-                                matches,
-                                ensure_ascii=False,
-                                indent=2,
-                            ),
-                        })
+                    evidence.append({
+                        "chunk_id": f"MCP-{len(evidence) + 1}",
+                        "distance": None,
+                        "project": "mock-data",
+                        "source_type": "mock_data",
+                        "file_path": payload.get(
+                            "file_path",
+                            "mock-data/orders.json",
+                        ),
+                        "section": "Mock order search",
+                        "symbol": "search_mock_orders",
+                        "implementation_status": "verified_mock_data",
+                        "frontend_reachable": None,
+                        "frontend_inbound_references": 0,
+                        "matched_identifiers": requested_labels,
+                        "start_line": 1,
+                        "end_line": 1,
+                        "text": json.dumps(
+                            orders,
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                    })
 
-                        transcript.append({
-                            "tool": "find_mock_order",
-                            "arguments": {"order_no": order_id.upper()},
-                            "result": mock_payload,
-                            "bootstrap": True,
-                        })
-            except Exception as mock_error:
-                transcript.append({
-                    "tool": "find_mock_order",
-                    "status": "execution_failed",
-                    "error": f"{type(mock_error).__name__}: {mock_error}",
-                })
-                
-        lowered_question = question.lower()
-
-requested_labels = [
-    label
-    for label in ("Priority", "VIP")
-    if label.lower() in lowered_question
-]
-
-if requested_labels:
-    mock_result = await mcp_client.call_tool(
-        "search_mock_orders",
-        {"labels": requested_labels},
-    )
-
-    if not mock_result.is_error:
-        payload = mock_result.structured_content
-
-        if not isinstance(payload, dict):
-            mock_text = "\n".join(
-                block.text
-                for block in mock_result.content
-                if getattr(block, "type", "") == "text"
-            )
-            payload = parse_json_object(mock_text)
-
-        if (
-            isinstance(payload, dict)
-            and payload.get("status") == "ok"
-        ):
-            orders = payload.get("orders", [])
-
-            evidence.append({
-                "chunk_id": f"MCP-{len(evidence) + 1}",
-                "distance": None,
-                "project": "mock-data",
-                "source_type": "mock_data",
-                "file_path": payload.get(
-                    "file_path",
-                    "mock-data/orders.json",
-                ),
-                "section": "Mock order search",
-                "symbol": "search_mock_orders",
-                "implementation_status": "verified_mock_data",
-                "frontend_reachable": None,
-                "frontend_inbound_references": 0,
-                "matched_identifiers": requested_labels,
-                "start_line": 1,
-                "end_line": 1,
-                "text": json.dumps(
-                    orders,
-                    ensure_ascii=False,
-                    indent=2,
+        except Exception as mock_error:
+            transcript.append({
+                "tool": "search_mock_orders",
+                "status": "execution_failed",
+                "error": (
+                    f"{type(mock_error).__name__}: "
+                    f"{mock_error}"
                 ),
             })
+
+                
+        
 
         # Bootstrap exact workflow identifiers before asking the planner what to do.
         # This prevents semantically similar but unrelated files from becoming the
