@@ -1159,6 +1159,43 @@ async def debug_mcp_search_code(query="dashboard"):
             }
 
 
+async def debug_mcp_source_health():
+    """Return MCP source-root diagnostics from the server."""
+    server_params = get_mcp_server_params()
+
+    async with asyncio.timeout(30):
+        async with Client(server_params) as mcp_client:
+            result = await mcp_client.call_tool(
+                "debug_source_root",
+                {},
+            )
+
+            text_blocks = []
+            for block in getattr(result, "content", []) or []:
+                if getattr(block, "type", "") == "text":
+                    text_blocks.append(
+                        getattr(block, "text", "")
+                    )
+
+            payload = getattr(
+                result,
+                "structured_content",
+                None,
+            )
+
+            if not isinstance(payload, dict):
+                joined = "\n".join(text_blocks).strip()
+                payload = parse_json_object(joined)
+
+            return {
+                "is_error": bool(
+                    getattr(result, "is_error", False)
+                ),
+                "payload": payload,
+                "text_content": text_blocks,
+            }
+
+
 st.sidebar.markdown(
     '<div class="shipra-section-label">Workspace</div>',
     unsafe_allow_html=True,
@@ -1196,6 +1233,42 @@ if st.sidebar.button(
 
 with st.sidebar.expander("MCP Debug"):
     st.caption("Temporary diagnostic tool")
+
+    if st.button(
+        "Check source health",
+        key="check_mcp_source_health",
+        use_container_width=True,
+    ):
+        try:
+            with st.spinner("Checking MCP source root..."):
+                health_result = asyncio.run(
+                    debug_mcp_source_health()
+                )
+
+            st.write("Source health:")
+            st.json(health_result)
+
+            payload = health_result.get("payload") or {}
+            total_files = int(
+                payload.get("total_source_files") or 0
+            )
+
+            if total_files <= 0:
+                st.error(
+                    "MCP can run, but no searchable Shipra source files "
+                    "are visible in the resolved project root."
+                )
+            else:
+                st.success(
+                    f"MCP can see {total_files} searchable source files."
+                )
+
+        except Exception as health_error:
+            st.error(
+                "Source health check failed: "
+                f"{type(health_error).__name__}: "
+                f"{health_error}"
+            )
 
     debug_query = st.text_input(
         "search_code query",
