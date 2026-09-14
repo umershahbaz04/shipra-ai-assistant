@@ -5,6 +5,7 @@ import math
 import re
 import time
 import asyncio
+import html
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -979,6 +980,59 @@ st.markdown(
         [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"])
         [data-testid="stChatMessageContent"] {
             max-width: 84% !important;
+        }
+    }
+
+    /* Guaranteed custom user prompt bubble */
+    .shipra-user-row {
+        width: 100%;
+        display: flex;
+        justify-content: flex-end;
+        align-items: flex-start;
+        margin: 0.95rem 0 1.4rem 0;
+        padding-left: 14%;
+        box-sizing: border-box;
+    }
+
+    .shipra-user-message {
+        max-width: 72%;
+        padding: 0.82rem 1.08rem;
+        border-radius: 1rem 1rem 0.32rem 1rem;
+        background: linear-gradient(
+            145deg,
+            #2d2f33 0%,
+            #24262a 100%
+        );
+        border: 1px solid rgba(255,255,255,0.12);
+        box-shadow:
+            0 10px 28px rgba(0,0,0,0.22),
+            inset 0 1px 0 rgba(255,255,255,0.035);
+        color: #f8f8f8;
+        font-size: 1rem;
+        line-height: 1.52;
+        font-weight: 520;
+        text-align: left;
+        word-break: break-word;
+    }
+
+    .shipra-user-message::before {
+        content: "YOU";
+        display: block;
+        margin-bottom: 0.34rem;
+        color: #a7a7a7;
+        font-size: 0.62rem;
+        line-height: 1;
+        font-weight: 750;
+        letter-spacing: 0.11em;
+    }
+
+    @media (max-width: 780px) {
+        .shipra-user-row {
+            padding-left: 4%;
+        }
+
+        .shipra-user-message {
+            max-width: 88%;
         }
     }
 
@@ -4732,17 +4786,27 @@ for conversation in list_conversations():
 
 # Render the selected conversation above the sticky composer.
 for message in st.session_state["chat_history"]:
-    message_avatar = (
-        ":material/person:"
-        if message["role"] == "user"
-        else ":material/auto_awesome:"
-    )
+    if message["role"] == "user":
+        safe_user_text = html.escape(
+            str(message["content"])
+        ).replace("\n", "<br>")
 
-    with st.chat_message(
-        message["role"],
-        avatar=message_avatar,
-    ):
-        st.markdown(message["content"])
+        st.markdown(
+            f"""
+            <div class="shipra-user-row">
+                <div class="shipra-user-message">
+                    {safe_user_text}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        with st.chat_message(
+            "assistant",
+            avatar=":material/auto_awesome:",
+        ):
+            st.markdown(message["content"])
 
 
 # Native Streamlit chat input stays pinned to the bottom of the viewport.
@@ -4762,11 +4826,20 @@ if question:
 
     st.session_state.pop("pending_clarification_question", None)
 
-    with st.chat_message(
-        "user",
-        avatar=":material/person:",
-    ):
-        st.markdown(question)
+    safe_question = html.escape(
+        str(question)
+    ).replace("\n", "<br>")
+
+    st.markdown(
+        f"""
+        <div class="shipra-user-row">
+            <div class="shipra-user-message">
+                {safe_question}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     with st.chat_message(
         "assistant",
