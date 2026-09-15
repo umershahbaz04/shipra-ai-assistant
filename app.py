@@ -4968,6 +4968,15 @@ def build_order_count_answer(status_result, response_language):
     return f"{heading}\n\nNo matching order records were found in the verified MCP mock data."
 
 
+
+def clean_assistant_display_text(answer):
+    """Remove internal/rendering artifacts without changing answer content."""
+    cleaned = str(answer or "")
+    cleaned = re.sub(r"(?mi)^\s*st\.iframe\s*$\n?", "", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
 def build_verified_mcp_fallback_answer(question, mcp_results):
     """Build a question-specific fallback from verified MCP evidence only."""
     response_language = get_response_language(question)
@@ -5115,13 +5124,13 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
 
     if response_language == "Roman Urdu":
         parts.append(
-            "Gemini response available nahi tha, is liye guide aur code flow sirf MCP-verified project evidence se banaye gaye hain."
+            "Neeche guide aur code flow verified MCP project evidence par based hain."
         )
         explanation_heading = "**Is code mein kya ho raha hai:**"
         explanation = "Yeh requested workflow se match karta hua exact MCP-verified source excerpt hai."
     else:
         parts.append(
-            "Gemini response was unavailable, so this guide and code flow were built only from MCP-verified project evidence."
+            "The guide and code flow below are based on verified MCP project evidence."
         )
         explanation_heading = "**What this code shows:**"
         explanation = "This is an exact MCP-verified source excerpt matched to the requested workflow."
@@ -5139,8 +5148,20 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
         symbol = str(result.get("symbol") or "Not detected")
         language = code_language(path)
 
-        if len(snippet) > 2600:
-            snippet = snippet[:2600].rstrip() + "\n// ..."
+        # A batch return-report modal is a different workflow from creating a
+        # normal return order. Keep it only when the user's question asks for
+        # batch/report behavior.
+        path_low = path.lower()
+        question_low = (question or "").lower()
+        if (
+            "batchcreatereturnreport" in path_low
+            and "batch" not in question_low
+            and "report" not in question_low
+        ):
+            continue
+
+        if len(snippet) > 1800:
+            snippet = snippet[:1800].rstrip() + "\n// ..."
 
         # Meaningful source headings instead of "Verified Source 1".
         p = path.lower()
@@ -5178,7 +5199,7 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
             explanation,
         ])
 
-        if shown >= 4:
+        if shown >= 3:
             break
 
     if shown == 0:
@@ -5814,7 +5835,7 @@ Question:
             code_cards,
             minimum_cards=minimum_code_cards,
         )
-        return verified_answer, results
+        return clean_assistant_display_text(verified_answer), results
 
     except Exception as error:
         elapsed = time.time() - gemini_started
@@ -5823,7 +5844,7 @@ Question:
             f"{type(error).__name__}: {error}"
         )
         print("Using verified MCP fallback immediately.")
-        return build_verified_mcp_fallback_answer(question, results), results
+        return clean_assistant_display_text(build_verified_mcp_fallback_answer(question, results)), results
 
 def generate_project_prompt(question):
     response_language = get_response_language(question)
