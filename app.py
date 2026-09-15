@@ -4585,6 +4585,112 @@ def build_verified_evidence_gap_answer(question):
     )
 
 
+
+def detect_order_count_status(question):
+    """Return a supported order status for direct count questions, else None."""
+    text = str(question or "").strip().lower()
+    if not re.search(r"\b(order|orders)\b", text):
+        return None
+
+    count_intent = (
+        re.search(r"\bhow\s+many\b", text)
+        or re.search(r"\bcount\b", text)
+        or re.search(r"\bnumber\s+of\b", text)
+        or re.search(r"\btotal\b", text)
+    )
+    if not count_intent:
+        return None
+
+    # Keep business concepts separate: COD pending is not order-status Pending.
+    if re.search(r"\bcod\s+pending", text):
+        return None
+
+    aliases = (
+        ("on_the_way", ("on the way", "ontheway")),
+        ("delivered", ("delivered",)),
+        ("pending", ("pending",)),
+        ("queued", ("queued", "queue")),
+    )
+    for canonical, terms in aliases:
+        if any(term in text for term in terms):
+            return canonical
+    return None
+
+
+async def get_verified_order_status_count(status_key):
+    """Read deterministic order counts from the MCP data tool, not source-code search."""
+    params = get_mcp_server_params()
+    async with asyncio.timeout(30):
+        async with Client(params) as mcp_client:
+            result = await mcp_client.call_tool(
+                "get_order_status_summary",
+                {
+                    "date_from": None,
+                    "date_to": None,
+                    "store_id": None,
+                    "carrier_id": None,
+                },
+            )
+
+    if result.is_error:
+        return None
+
+    payload = result.structured_content
+    if not isinstance(payload, dict):
+        raw = "\n".join(
+            block.text
+            for block in result.content
+            if getattr(block, "type", "") == "text"
+        )
+        payload = parse_json_object(raw)
+
+    if not isinstance(payload, dict) or payload.get("status") != "ok":
+        return None
+
+    counts = payload.get("counts") or {}
+    if status_key not in counts:
+        return None
+
+    try:
+        count = int(counts[status_key])
+    except (TypeError, ValueError):
+        return None
+
+    return {
+        "count": count,
+        "status_key": status_key,
+        "total_orders": payload.get("total_orders"),
+        "data_source": payload.get("data_source", "mock"),
+        "filters": payload.get("filters") or {},
+    }
+
+
+def build_order_count_answer(status_result, response_language):
+    """Return a concise direct answer for verified order-status count questions."""
+    labels = {
+        "delivered": "delivered",
+        "pending": "pending",
+        "queued": "queued",
+        "on_the_way": "on the way",
+    }
+    key = status_result["status_key"]
+    label = labels.get(key, key.replace("_", " "))
+    count = status_result["count"]
+
+    if response_language == "Roman Urdu":
+        return (
+            f"**{count} orders {label} hain.**\n\n"
+            "Ye count verified MCP mock order data se directly calculate hua hai; "
+            "source-code/RAG snippets se infer nahi kiya gaya."
+        )
+
+    return (
+        f"**{count} orders are {label}.**\n\n"
+        "This count comes directly from the verified MCP mock order data; "
+        "it was not inferred from source-code/RAG snippets."
+    )
+
+
 def ask_shipra_project_ai(question, intent):
     response_language = get_response_language(question)
     code_explanation_heading = (
@@ -4601,6 +4707,36 @@ def ask_shipra_project_ai(question, intent):
     )
 
     request_profile = detect_request_profile(question)
+
+    # DATA QUERY FAST PATH: count/status questions must use structured MCP data
+    # before source-code retrieval. This prevents "pending" from drifting into
+    # unrelated COD-pending handlers or other semantic source matches.
+    order_count_status = detect_order_count_status(question)
+    if order_count_status:
+        try:
+            status_result = asyncio.run(
+                get_verified_order_status_count(order_count_status)
+            )
+        except Exception:
+            status_result = None
+
+        if status_result is not None:
+            return build_order_count_answer(
+                status_result,
+                response_language,
+            ), []
+
+        # A data-count question must never fall through to code/RAG and present
+        # a handler as if it were the requested current count.
+        if response_language == "Roman Urdu":
+            return (
+                "Current order count verified MCP data se retrieve nahi ho saka. "
+                "Main source-code snippets dekh kar count guess nahi kar raha."
+            ), []
+        return (
+            "I couldn't retrieve the current order count from verified MCP data. "
+            "I won't infer the count from source-code snippets."
+        ), []
 
     # Validate raw source availability before code-flow retrieval. Mock-data
     # record lookups are allowed to continue because they use a separate tool.
