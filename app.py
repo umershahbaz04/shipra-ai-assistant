@@ -1272,19 +1272,28 @@ with st.sidebar.expander("MCP Debug"):
                 f"{health_error}"
             )
 
-            # Show the real nested error from ExceptionGroup
-            if isinstance(health_error, BaseExceptionGroup):
-                for i, sub_error in enumerate(
-                    health_error.exceptions,
-                    start=1,
-                ):
-                    st.error(
-                        f"Sub-exception {i}: "
-                        f"{type(sub_error).__name__}: "
-                        f"{sub_error}"
-                    )
+            # Recursively show the REAL error inside nested ExceptionGroups
+            def show_nested_exception(error, level=1):
+                if isinstance(error, BaseExceptionGroup):
+                    for i, sub_error in enumerate(
+                        error.exceptions,
+                        start=1,
+                    ):
+                        st.error(
+                            f"Level {level} - Sub-exception {i}: "
+                            f"{type(sub_error).__name__}: "
+                            f"{sub_error}"
+                        )
 
-            # Print the complete traceback in Streamlit Cloud logs
+                        # Keep opening nested ExceptionGroups
+                        show_nested_exception(
+                            sub_error,
+                            level + 1,
+                        )
+
+            show_nested_exception(health_error)
+
+            # Complete traceback in Streamlit Cloud logs
             print(
                 "\n========== SOURCE HEALTH CHECK ERROR =========="
             )
