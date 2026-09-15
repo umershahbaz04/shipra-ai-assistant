@@ -6418,14 +6418,95 @@ for conversation in list_conversations():
 
 
 def render_message_copy_button(content, key, align="left"):
-    """Native Streamlit copy UI; avoids custom iframe components."""
+    """Small ChatGPT-style copy action directly below the message."""
+    import json as _json
+
     text_value = str(content or "")
-    if hasattr(st, "popover"):
-        with st.popover("⧉", help="Copy message"):
-            st.code(text_value, language=None)
-    else:
-        with st.expander("⧉ Copy"):
-            st.code(text_value, language=None)
+    safe_text = _json.dumps(text_value)
+    safe_key = re.sub(r"[^a-zA-Z0-9_-]", "_", str(key))
+    justify = "flex-end" if align == "right" else "flex-start"
+
+    st.components.v1.html(
+        f"""
+        <div style="
+            display:flex;
+            justify-content:{justify};
+            align-items:center;
+            height:22px;
+            margin-top:-3px;
+            margin-bottom:5px;
+            padding:0;
+            background:transparent;
+        ">
+            <button
+                id="copy_{safe_key}"
+                title="Copy"
+                aria-label="Copy"
+                onclick='copyMessage_{safe_key}()'
+                style="
+                    display:inline-flex;
+                    align-items:center;
+                    justify-content:center;
+                    width:26px;
+                    height:22px;
+                    padding:0;
+                    margin:0;
+                    border:0;
+                    border-radius:5px;
+                    background:transparent;
+                    color:#9b9b9b;
+                    cursor:pointer;
+                "
+                onmouseover="this.style.background='rgba(255,255,255,0.07)';this.style.color='#d7d7d7';"
+                onmouseout="this.style.background='transparent';this.style.color='#9b9b9b';"
+            >
+                <svg width="16" height="16" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" stroke-width="1.8"
+                     stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="11" height="11" rx="1.5"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+            </button>
+        </div>
+
+        <script>
+        function copyMessage_{safe_key}() {{
+            const value = {safe_text};
+            const button = document.getElementById("copy_{safe_key}");
+
+            function showDone() {{
+                const old = button.innerHTML;
+                button.innerHTML =
+                    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" ' +
+                    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+                    'stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+                button.title = "Copied";
+                setTimeout(() => {{
+                    button.innerHTML = old;
+                    button.title = "Copy";
+                }}, 1200);
+            }}
+
+            if (navigator.clipboard && window.isSecureContext) {{
+                navigator.clipboard.writeText(value).then(showDone);
+            }} else {{
+                const area = document.createElement("textarea");
+                area.value = value;
+                area.style.position = "fixed";
+                area.style.opacity = "0";
+                document.body.appendChild(area);
+                area.focus();
+                area.select();
+                document.execCommand("copy");
+                document.body.removeChild(area);
+                showDone();
+            }}
+        }}
+        </script>
+        """,
+        height=24,
+        scrolling=False,
+    )
 
 
 # Render the selected conversation above the sticky composer.
