@@ -3150,6 +3150,47 @@ def get_mcp_seed_queries(question, search_results):
         for word in meaningful_words[:4]:
             add(word)
 
+    # Workflow questions need UI/action files, not only domain entities.
+    profile = detect_request_profile(question)
+    action = str(profile.get("action") or "").strip().lower()
+    workflow_actions = {
+        "create": "Create", "update": "Update", "delete": "Delete",
+        "assign": "Assign", "connect": "Connect", "sync": "Sync",
+        "import": "Import", "export": "Export",
+    }
+
+    if action in workflow_actions and meaningful_words:
+        action_words = {
+            "create", "add", "make", "new", "update", "edit", "change",
+            "delete", "remove", "assign", "connect", "sync", "import",
+            "export", "generate",
+        }
+        entity_words = [
+            word for word in meaningful_words
+            if word.lower() not in action_words
+        ][:4]
+
+        if entity_words:
+            variants = [entity_words]
+            singular = list(entity_words)
+            if singular[-1].lower().endswith("s") and len(singular[-1]) > 3:
+                singular[-1] = singular[-1][:-1]
+                variants.append(singular)
+
+            prefix = workflow_actions[action]
+            for words in variants:
+                entity_pascal = "".join(
+                    word[:1].upper() + word[1:] for word in words
+                )
+                add(
+                    entity_pascal,
+                    prefix + entity_pascal,
+                    entity_pascal + "Modal",
+                    prefix + entity_pascal + "Modal",
+                    entity_pascal + "Form",
+                    entity_pascal + "Page",
+                )
+
     # Reuse exact code identifiers already surfaced by indexed retrieval as
     # additional literal-search hints, without trusting those paths as live MCP evidence.
     for item in search_results[:6]:
@@ -3157,7 +3198,7 @@ def get_mcp_seed_queries(question, search_results):
         if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{4,}", symbol):
             add(symbol)
 
-    return seeds[:16]
+    return seeds[:24]
 
 
 def mcp_match_priority(file_path, seed_query, question):
@@ -3174,6 +3215,21 @@ def mcp_match_priority(file_path, seed_query, question):
     if query and query in path:
         score += 800
     score += 80 * len(topic_tokens.intersection(path_tokens))
+
+    # For workflow questions, prefer screens/modals/forms over domain entities.
+    workflow_question = detect_request_profile(question).get("action") in {
+        "create", "update", "delete", "assign", "connect",
+        "sync", "import", "export",
+    }
+    if workflow_question:
+        if "/src/components/" in path or "/src/pages/" in path:
+            score += 900
+        if any(x in path for x in ("modal", "form", "/list/", "index.js", "index.jsx", "index.tsx")):
+            score += 500
+        if "/api/" in path or "axiosinterceptors" in path:
+            score += 350
+        if "api.core/" in path or "/core/" in path:
+            score -= 650
 
     # Prefer executable layers over generic neighboring screens.
     if "/src/components/" in path or "/src/pages/" in path:
@@ -5175,6 +5231,22 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
         )
 
     q = (question or "").lower()
+
+    if detect_request_profile(question).get("action") in {
+        "create", "update", "delete", "assign", "connect",
+        "sync", "import", "export",
+    }:
+        results = sorted(
+            results,
+            key=lambda r: (
+                0 if "shipra.frontend/" in str(r.get("file_path") or "").lower() else 1,
+                0 if any(
+                    x in str(r.get("file_path") or "").lower()
+                    for x in ("modal", "form", "/pages/", "/list/")
+                ) else 1,
+            ),
+        )
+
     combined = "\n".join(
         f"{r.get('file_path','')}\n{r.get('symbol','')}\n{r.get('text','')}"
         for r in results
