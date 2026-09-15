@@ -14,8 +14,7 @@ from collections import Counter, defaultdict
 
 import faiss
 import streamlit as st
-from google import genai
-from google.genai import types
+from groq import Groq
 from sentence_transformers import SentenceTransformer
 from supabase import create_client, Client as SupabaseClient
 
@@ -1136,12 +1135,49 @@ st.markdown(
 )
 
 
-GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-client = genai.Client(api_key=GEMINI_API_KEY)
+GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 
-# Gemini model configuration
-PRIMARY_MODEL = "gemini-3.8-flash"
-FALLBACK_MODEL = "gemini-3.6-flash"
+# Groq model configuration
+PRIMARY_MODEL = "openai/gpt-oss-20b"
+FALLBACK_MODEL = "llama-3.1-8b-instant"
+
+
+class _GroqTextResponse:
+    """Small compatibility wrapper so the existing app can keep using response.text."""
+    def __init__(self, text):
+        self.text = text or ""
+
+
+class _GroqModelsAdapter:
+    """Expose the existing generate_content interface backed by Groq chat completions."""
+    def __init__(self, groq_client):
+        self._client = groq_client
+
+    def generate_content(self, model, contents, config=None):
+        # `config` is accepted for compatibility with the existing call sites.
+        # Groq request timeout/retry behavior is configured on the client itself.
+        response = self._client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": str(contents)}],
+            temperature=0.1,
+        )
+        text = ""
+        if response.choices:
+            text = response.choices[0].message.content or ""
+        return _GroqTextResponse(text)
+
+
+class _GroqClientAdapter:
+    def __init__(self, api_key):
+        groq_client = Groq(
+            api_key=api_key,
+            timeout=20.0,
+            max_retries=0,
+        )
+        self.models = _GroqModelsAdapter(groq_client)
+
+
+client = _GroqClientAdapter(GROQ_API_KEY)
 def get_mcp_server_params():
     """
     Build MCP stdio launch parameters without any machine-specific Windows path.
@@ -2818,7 +2854,7 @@ def detect_request_profile(question):
 
 
 def classify_question(question):
-    # Deterministic routing first. Gemini is only a fallback for ambiguous text.
+    # Deterministic routing first. Groq is only a fallback for ambiguous text.
     if re.search(r"\bORD-\d+\b", question, flags=re.IGNORECASE):
         return PROJECT_EXISTING
 
@@ -2924,7 +2960,7 @@ Latest question:
 
 
 def filter_relevant_results(results, question):
-    """Drop weak semantic neighbors before they reach Gemini."""
+    """Drop weak semantic neighbors before they reach Groq."""
     generic_tokens = {
         "create", "connect", "update", "delete", "fetch", "validate",
         "frontend", "backend", "flow", "code", "file", "function",
@@ -5678,12 +5714,12 @@ def ask_shipra_project_ai(question, intent):
     context = build_context(results, search_question)
 
     # SPEED: keep full verified MCP results for code injection/fallback, but limit
-    # only the text sent to Gemini. This reduces prompt/token processing latency.
-    MAX_GEMINI_CONTEXT_CHARS = 24000
-    if len(context) > MAX_GEMINI_CONTEXT_CHARS:
-        context = context[:MAX_GEMINI_CONTEXT_CHARS]
+    # only the text sent to Groq. This reduces prompt/token processing latency.
+    MAX_GROQ_CONTEXT_CHARS = 24000
+    if len(context) > MAX_GROQ_CONTEXT_CHARS:
+        context = context[:MAX_GROQ_CONTEXT_CHARS]
         print(
-            f"Gemini context capped at {MAX_GEMINI_CONTEXT_CHARS} chars "
+            f"Groq context capped at {MAX_GROQ_CONTEXT_CHARS} chars "
             "for faster generation."
         )
 
@@ -6006,37 +6042,26 @@ Question:
 """
 
     # FAIL-FAST GENERATION:
-    # Exactly one Gemini request. No hedge, no fallback-model wait, no retry loop,
+    # Exactly one Groq request. No hedge, no fallback-model wait, no retry loop,
     # no sleep, and no separate guide-generation call.
     model_name = PRIMARY_MODEL
-    gemini_started = time.time()
+    groq_started = time.time()
 
     try:
         response = client.models.generate_content(
             model=model_name,
             contents=prompt,
-            config=types.GenerateContentConfig(
-                thinking_config=types.ThinkingConfig(
-                    thinking_level="low",
-                ),
-                http_options=types.HttpOptions(
-                    timeout=20000,
-                    retry_options=types.HttpRetryOptions(
-                        attempts=1,
-                    ),
-                ),
-            ),
         )
-        elapsed = time.time() - gemini_started
-        print(f"GEMINI TOTAL [{model_name}]: {elapsed:.2f} sec")
+        elapsed = time.time() - groq_started
+        print(f"GROQ TOTAL [{model_name}]: {elapsed:.2f} sec")
         answer_text = (response.text or "").strip()
 
         if not answer_text:
-            raise ValueError("Gemini returned an empty response.")
+            raise ValueError("Groq returned an empty response.")
 
         if needs_language_retry(answer_text, response_language):
             print(
-                "Gemini language warning; keeping the first response "
+                "Groq language warning; keeping the first response "
                 "instead of making another model call."
             )
 
@@ -6063,13 +6088,13 @@ Question:
 
         if is_explanation_question(question):
             if code_marker not in answer_text:
-                raise ValueError("Gemini explanation omitted Actual Project Code Flow.")
+                raise ValueError("Groq explanation omitted Actual Project Code Flow.")
             return clean_assistant_display_text(inject_verified_code(
                 answer_text, code_cards, minimum_cards=minimum_code_cards
             )), results
 
         if (scenario_marker not in answer_text or code_marker not in answer_text):
-            raise ValueError("Gemini response omitted a required answer section.")
+            raise ValueError("Groq response omitted a required answer section.")
 
         # Keep the guide clean locally; do not make a second AI request.
         before_code, code_body = answer_text.split(code_marker, 1)
@@ -6106,9 +6131,9 @@ Question:
         return clean_assistant_display_text(verified_answer), results
 
     except Exception as error:
-        elapsed = time.time() - gemini_started
+        elapsed = time.time() - groq_started
         print(
-            f"GEMINI FAILED [{model_name}] after {elapsed:.2f} sec: "
+            f"GROQ FAILED [{model_name}] after {elapsed:.2f} sec: "
             f"{type(error).__name__}: {error}"
         )
         print("Using verified MCP fallback immediately.")
