@@ -5,3 +5,4 @@ google-genai
 numpy
 mcp==2.2.0
 supabase
+grouq
