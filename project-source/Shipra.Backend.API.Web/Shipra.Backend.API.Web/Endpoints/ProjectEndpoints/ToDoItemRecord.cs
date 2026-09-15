@@ -1,0 +1,3 @@
+﻿namespace Shipra.Backend.API.Web.Endpoints.ProjectEndpoints;
+
+public record ToDoItemRecord(int Id, string Title, string Description, bool IsDone);

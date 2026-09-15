@@ -1,0 +1,56 @@
+# .NET compiled/build files
+**/bin/
+**/obj/
+*.dll
+*.pdb
+*.deps.json
+*.runtimeconfig.json
+
+# Frontend dependencies/build
+**/node_modules/
+**/build/
+**/dist/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# IDE/cache
+.vs/
+**/.cache/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# ZIP copies - MCP needs extracted source, not archives
+project-source/*.zip
+
+# Sensitive configuration
+**/appsettings.json
+**/appsettings.*.json
+
+# Environment/secrets
+.env
+.env.*
+!.env.example
+
+# Sensitive configuration
+**/appsettings.json
+**/appsettings.*.json
+**/launchSettings.json
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Amazon source files containing hard-coded credentials
+**/AmazonOrderPreProcessorService.cs
+**/AmazonProductPostProcessorService.cs
+
+# Amazon processor files containing hard-coded credentials
+**/AmazonOrderPreProcessorService.cs
+**/AmazonProductPreProcessorService.cs
+**/AmazonProductPostProcessorService.cs

@@ -1,0 +1,202 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>4x6-label</title>
+    <style>
+        * {
+            padding: 0px !important;
+            margin: 0px !important;
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 16px;
+        }
+
+        .heading {
+            font-weight: bold;
+        }
+
+        .w-25 {
+            width: 25% !important;
+        }
+
+        .w-24 {
+            width: 24% !important;
+        }
+
+        .p-5 {
+            padding: 5% !important;
+        }
+
+        .w-32 {
+            width: 32% !important;
+        }
+
+        .w-5 {
+            width: 5% !important;
+        }
+
+        .w-10 {
+            width: 10% !important;
+        }
+
+        .w-20 {
+            width: 20% !important;
+        }
+
+        .w-30 {
+            width: 30% !important;
+        }
+
+        .w-40 {
+            width: 40% !important;
+        }
+
+        .w-50 {
+            width: 50% !important;
+        }
+
+        .w-60 {
+            width: 60% !important;
+        }
+
+        .w-70 {
+            width: 70% !important;
+        }
+
+        .w-80 {
+            width: 80% !important;
+        }
+
+        .w-90 {
+            width: 90% !important;
+        }
+
+        .w-100 {
+            width: 100% !important;
+        }
+
+        .bt {
+            border-top: 2px solid black;
+            padding-top: 5px !important;
+            margin-top: 5px !important;
+        }
+
+        .br {
+            border-right: 2px solid black;
+            padding-right: 5px !important;
+            margin-right: 5px !important;
+        }
+
+        .bb {
+            border-bottom: 2px solid black;
+            padding-bottom: 5px !important;
+            margin-bottom: 5px !important;
+        }
+
+        .bl {
+            border-left: 2px solid black;
+            padding-left: 5px !important;
+            margin-left: 5px !important;
+        }
+
+        table {
+            border-collapse: collapse;
+        }
+
+            table > tbody > tr > th, td {
+                text-align: center;
+            }
+
+        .tc {
+            text-align: center !important;
+        }
+
+        .bgc {
+            background-color: gray !important;
+            color: black;
+        }
+
+        td, th {
+            padding: 3px 5px;
+            /*width: 60px;*/
+            height: 20px;
+            font-size: 11px !important;
+        }
+
+        .rote {
+            display: inline-block;
+            transform-origin: top right;
+            transform: rotate(90deg) translate(-100%);
+            margin-top: 50%;
+            white-space: nowrap;
+            width: 23px;
+        }
+
+        .talc {
+            text-align: center !important;
+        }
+        .text-1 {
+            font-size: 25px;
+            font-weight: 600;
+            color: #bbbbbb;
+            letter-spacing: 1px;
+        }
+    </style>
+</head>
+<body style="font-size:11px !important;">
+    <table class="w-100">
+        <tr>
+            <td>
+                <table class="w-100">
+                    <tr>
+                        <td>
+                            <table class="w-100">
+                                <td class="bb w-30 talc">
+                                    <div class="w-50 text-1 text-right">
+                                        {{clientName}}
+                                    </div>
+                                    <!--<img class="p-5" width="150" height="50" src="{{companyLogo}}" />-->
+                                </td>
+                                <td class="bb w-70" style="text-align: center; margin-left:-15px;">
+                                    <span style="font-size: 12px;">Expense Report</span>
+                                    <br />
+                                    <span style="font-size: 12px">Dated: {{date}}
+                                </td>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <table class="w-100" style="font-size:11px !important;">
+                            <tr class="bt bb">
+                                <th class="bb w-5">Sr.No </th>
+                                <th class="bb w-10">Driver Name</th>
+                                <th class="bb w-10">Driver Code</th>
+                                <th class="bb w-10">Note No.</th>
+                                <th class="bb w-10">Expense Type</th>
+                                <th class="bb w-10">Expense Date</th>
+                                <th class="bb w-10">Amount</th>
+                            </tr>
+                            <tbody>
+                                {{reportDatas}}
+                            </tbody>
+                        </table>
+                    </tr>
+
+
+                </table>
+            </td>
+        </tr>
+
+
+    </table>
+
+</body>
+<tr>
+    <td class="br w-70" style="font-weight: bold; font-size: 26px">
+        <b> Total Expense Amount: {{totalAmount}}</b>
+    </td>
+    <br />
+</tr>
+</html>

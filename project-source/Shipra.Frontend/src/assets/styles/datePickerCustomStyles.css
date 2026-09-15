@@ -1,0 +1,19 @@
+  .react-datepicker__input-container {
+    width: inherit;
+  }
+  
+  .react-datepicker-wrapper {
+    width: 100%;
+  }
+  .react-datepicker {
+    background-color: #FFF;
+    z-index: 2001 !important;
+    position: fixed;
+    display: inline-block; 
+}
+.modal{
+    z-index: 1000 !important;
+} 
+.react-datepicker-popper {
+  z-index: 999999 !important;
+}

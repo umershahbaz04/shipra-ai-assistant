@@ -1,0 +1,2 @@
+make an api..that takes 3 things 1.username,password,crarier id and add it to active Career
+CarrierConfigModel inside Config column

@@ -1,0 +1,35 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <Sdk Name="Microsoft.Build.CentralPackageVersions" Version="2.1.3" />
+
+  <PropertyGroup>
+    <TargetFramework>net7.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Ardalis.GuardClauses" />
+    <PackageReference Include="Ardalis.Result" />
+    <PackageReference Include="Ardalis.SmartEnum" />
+    <PackageReference Include="Ardalis.Specification" />
+    <PackageReference Include="Autofac" />
+    <PackageReference Include="DocumentFormat.OpenXml" />
+    <PackageReference Include="itext.html2pdf.core" />
+    <PackageReference Include="MediatR" />
+    <PackageReference Include="Microsoft.AspNetCore.Http.Features" />
+    <PackageReference Include="System.Configuration.ConfigurationManager" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Shipra.Backend.API.SharedKernel\Shipra.Backend.API.SharedKernel.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="ProductAggregate\Command\" />
+    <Folder Include="ProductAggregate\Events\" />
+    <Folder Include="ProductAggregate\Handlers\" />
+    <Folder Include="ProductAggregate\Rules\" />
+    <Folder Include="ProductAggregate\Specifications\" />
+  </ItemGroup>
+
+</Project>

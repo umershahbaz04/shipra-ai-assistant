@@ -1,0 +1,37 @@
+﻿using Microsoft.Extensions.Logging;
+using Shipra.Backend.API.Application.Common;
+using Shipra.Backend.API.Application.Common.Exceptions;
+using Shipra.Backend.API.Application.DTOs;
+using Shipra.Backend.API.Core.EmployeeAggregate;
+using Shipra.Backend.API.Core.Interfaces;
+
+namespace Shipra.Backend.API.Application.Features.StoreFeatures.Command.EnableStoreCommand;
+public class EnableStoreCommandHandler : RequestHandlerBase<EnableStoreCommand, ServiceResultDTOWithTypeModel<BaseResponseDto>>
+{
+  private readonly IStoreRepository _storeRepository;
+  public EnableStoreCommandHandler(IStoreRepository storeRepository, IServiceProvider serviceProvider, ILogger<EnableStoreCommandHandler> logger) : base(serviceProvider, logger)
+  {
+    _storeRepository = storeRepository;
+  }
+
+  protected override async Task<ServiceResultDTOWithTypeModel<BaseResponseDto>> HandleRequest(EnableStoreCommand request, CancellationToken cancellationToken)
+  {
+    var response = new ServiceResultDTOWithTypeModel<BaseResponseDto>();
+    try
+    {
+      var store = await _storeRepository.GetStoreById(request.StoreId, _currentUser.ClientId!);
+      if (store == null)
+      {
+        throw new EntityNotFoundException("Store ", request.StoreId);
+      }
+      store.EnableStore(_currentUser.EmployeeId!);
+      response.IsSuccess = await _storeRepository.EnableStore(store);
+      return response;
+    }
+    catch (Exception ex)
+    {
+      response.CreateErrorResponse(ex);
+      throw;
+    }
+  }
+}

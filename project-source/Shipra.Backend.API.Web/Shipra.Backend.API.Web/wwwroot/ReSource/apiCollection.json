@@ -1,0 +1,136 @@
+{
+	"info": {
+		"_postman_id": "501ae112-a3da-4905-8aea-c0c9ec8d49e5",
+		"name": "DocumentationApis",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "27744865",
+		"_collection_link": "https://galactic-station-604832.postman.co/workspace/Shippra-backend~97617e9b-8b42-43e2-860c-65060fbe5617/collection/27744865-501ae112-a3da-4905-8aea-c0c9ec8d49e5?action=share&source=collection_link&creator=27744865"
+	},
+	"item": [
+		{
+			"name": "Login",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "",
+							"type": "string"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"userName\": \"alshameer\",\r\n  \"password\": \"Qwerty@123\"\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{baseurl}}/api/Login",
+					"host": [
+						"{{baseurl}}"
+					],
+					"path": [
+						"api",
+						"Login"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "GetAccessTokenWithRefreshToken",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"UserName\": \"alhoor\",\r\n  \"RefreshToken\": \"eyJjdHkiOiJKV1QiLCJlbmMiOiJBMjU2R0NNIiwiYWxnIjoiUlNBLU9BRVAifQ.sXyZxbx5arFGzf8u_r0ePS8qTvg28z2soHUffIVCy3anoqZeJs6gRBqoFGVMp0lr4BzDmz-psXnwkwL0jg3Zu4CfLmherVK3Get14tMwJIQidtgZf8jLbpYQ71PcUuvUJJEp180JfgTdrY9NFw49WhBF7GTg0NindAfKaHnxseHKLehOTdzdWSfTCoAR9JdVbvPyP4J2ArjLWEfibW0E2YR3pFA2b7qJ3-ijpgDslgU5vHGbYja_f0Qy_o4sPwjycNpWPJ2w6XhH0AjUYKYzdwFigj298UQ57qCzOqZ-Xv9Wxmb0uu82maaHwU9oEKODMDK6hx73Cm9EyOErFkS3xw.z35eesIkdM_m30Nf.7EdWB3wMpNGhYZYfKi83F6ofedOpxs247INoARnlXTDFilXL4nWQsVB1N0uBWBolREpcvKBFf6PZVV3SE2tP-p8YIrzz9szh6YTHIIObJshRJnCGd6mnCEp5-yvHKZtnd9EVJxuyP288m1RvYSXYY361pqJIE1ZIuKeF2pk8AWp0-YIWc-CpbifUqdsoV15OpNZRz9cPE6knYJwmWz0bo67p-SbAlzET2_t-uR_c6WZmcM3Lj_AtO6ZzeS-fRFEEwxSCdYYIsKKHSgRGLjmFX-IHH7sIHi3Rf2ftTnM7jwtFGbUmB6_oVOgkp3B7MbLgkIi_0uxbpdR4XVsDDSuelSQa0JhC4M64JPMnHeEMQ-2ycAWpx2OQZR2J-tV4dDbTS2XDDwJnjOvYKTx1l_mpXI15OmnaYPl3nDYcSLHBAJGqnIdnhOeWZxpqG84WmDuQ9daZ4dbpJqBog-UiJ5eeVjlbvCEixVHipV2UxvRJqQDpd8X2lSqcu4jUEquTZU_T7Um1gCKsFVwevNWrrYDm8t6dGe4i8XrA-hNm0w1_rNpdx-CV1OwZmZDRibcurwNoysQsvXYp06oVTRb09s4_twVhOhLUhiOOnFprkClXszI1eJJVJow0snmgFbvSN8D2cxe2kgxQ2FQE2zkr5qnLGwNp45bb6AFI0dXh_H3cCFL9ZJ109uxnOOQXMrRvJ8xjs1fvssonhubJveLrZu69Pio9Uys-ajsw63D1yAIJn7TBsBHhOUcHDcOA9XrVDQifTxMczO2rWNfdGAfr0gZ0MSU6s8ifJK5cWPlC9BKi4A8-Ez5kZN7tZyGQ8YDSR7XGAbYp_FGyKYB05HmEOWJMqXIyx1E9QuU97p5silWFcRyVYGntFuA-nhee9gbHHk8STbRu6ipxUUDiIZ7kJ6nQyejqcCSrhGsaCC4xp2GkHX6LqfCwJI2ApG2pG5nHjskVCbiR7-vp9kZ7dXh9wYQhO_UCHaj1egN0mOpn3k1P7-LiluZVBSE8krCGSSr0gt9MI7CYa5RlNIzJCpMkYyacrjfL72qR96aoa4f6QCFin7uUdOgBbpwuoUJnFNlykToGKSi4SvL8Rc2ieALLH6wQvTN9tbwu7vrunZ-WHe_nbs9M8TsA-S9FKOFn7cswMRLXA0ftBgTvsq3SDIBCvC-qhBXYIy9-lX2rbsXN7LHVPEcuJqXcn-_kRaBqp3z4LDeBjW3p3GHOqYDC2ygXFH5Dk98fxoVsKb754saTCSIzKitNFWUKOBBpjQVJmuGL2jeCxeZTSidc.l8RuLsQzfAMZt-sa9kYsbw\"\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{baseurl}}/api/GetAccessTokenWithRefreshToken",
+					"host": [
+						"{{baseurl}}"
+					],
+					"path": [
+						"api",
+						"GetAccessTokenWithRefreshToken"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "CreateOrder",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "eyJraWQiOiJlN1Z3ZFI5bzJvTElCQ1wvOHBLRkpHcHlFVndPUk8xa1Y0M1B4bGV3RHVtST0iLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJmMTMzZmQwYS0yMDQxLTcwNmYtNjUxNS0yZjg3YzI3YmM5ZGIiLCJjb2duaXRvOmdyb3VwcyI6WyJEZWZhdWx0Il0sImlzcyI6Imh0dHBzOlwvXC9jb2duaXRvLWlkcC5hcC1zb3V0aC0xLmFtYXpvbmF3cy5jb21cL2FwLXNvdXRoLTFfZ2RwU3ZoYklvIiwiY2xpZW50X2lkIjoiNnZkaWo5aGYxYjRzYTd1N29kZGsxMDdrY3MiLCJvcmlnaW5fanRpIjoiZmM0NmMzODItNTYzMC00MjlkLWE5NjUtOTQ0NjgzNWZlNzhlIiwiZXZlbnRfaWQiOiI4NTM3MDIyNy1jYTJmLTQ2NjktODExZC1lYzBjNDFhYmU2ZmMiLCJ0b2tlbl91c2UiOiJhY2Nlc3MiLCJzY29wZSI6ImF3cy5jb2duaXRvLnNpZ25pbi51c2VyLmFkbWluIiwiYXV0aF90aW1lIjoxNjg5MTQzOTIxLCJleHAiOjE2ODkxNDc1MjEsImlhdCI6MTY4OTE0MzkyMSwianRpIjoiZmFiODcyZWQtOWIwNC00ZGVmLTlhZTQtMzRlZmJkNzcwZGU2IiwidXNlcm5hbWUiOiJhbGhvb3IifQ.d7amJ6M8D_h6x83oXcJB-N7Umig0pvMK-NGdVen3WPq8ZN4J7oJD0CkYkV7OwsuVYYxKDdbLcaGdxH8MVX0M3lu7S2N0i_zvzJaUA0MS-oiVNgPcrPPKG7Ed71w9Bf_N9z6wSD2aDtyOhmt3Yn6WvPz-Pb85ZskiXXcjZQePGd596rRjHaaJmJ6OMYOaiRWSizQMyMaKAj85tq5oH-BvnGowmoBttpQZRX8ks2k6mqSBHecCeM_mUqAbNCAY_As1STe6IPmDNuAzMoQV2Bt7-fNxEAHBJtJQe4AsU8pGyuMn0mHoAJIgpQzGv_KW3r4wcb-qw8zXcoARJf9U-hliPw",
+							"type": "string"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"orderList\": [\r\n    {\r\n      \"storeId\": 2,\r\n        \"channelId\": 0,\r\n      \"orderTypeId\": 2,\r\n      \"orderDate\": \"2023-07-12T12:08:41.633Z\",\r\n      \"description\": \"create order\",\r\n      \"remarks\": \"create order\",\r\n      \"amount\": 20,\r\n      \"deliveryCharges\": 20,\r\n      \"paymentStatusId\": 2,\r\n      \"weight\": 20,\r\n      \"itemValue\": 20,\r\n      \"orderRequestVia\": 20,\r\n      \"paymentMethodId\": 2,\r\n      \"stationId\": 2,\r\n      \"discount\": 200,\r\n      \"vat\": 2,\r\n      \"orderNote\": {\r\n        \"note\": \"create order\"\r\n      },\r\n      \"orderAddress\": {\r\n        \"customerName\": \"alii\",\r\n        \"email\": \"alii@gmail.com\",\r\n        \"mobile1\": \"038738942698\",\r\n        \"mobile2\": \"038738942698\",\r\n        \"countryId\": 2,\r\n        \"regionId\": 2,\r\n        \"cityId\": 2,\r\n        \"streetAddress\": \"technobatch\",\r\n        \"latitude\": 0,\r\n        \"longitude\": 0\r\n      },\r\n      \"orderItems\": [\r\n        {\r\n          \"productId\": \"AEC239E0-6C70-4C97-9D07-6F579337BC12\",\r\n          \"productStockId\": 20,\r\n          \"price\": 20,\r\n          \"description\": \"create ordertest\",\r\n          \"remarks\": \"create ordertest\",\r\n          \"quantity\": 20,\r\n          \"discount\": 20\r\n        }\r\n      ]\r\n    }\r\n  ]\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{baseurl}}/api/CreateOrder",
+					"host": [
+						"{{baseurl}}"
+					],
+					"path": [
+						"api",
+						"CreateOrder"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "GetOrderTrackingHistoryByOrderNo",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseurl}}/api/GetOrderTrackingHistoryByOrderNo?OrderNo=10000001",
+					"host": [
+						"{{baseurl}}"
+					],
+					"path": [
+						"api",
+						"GetOrderTrackingHistoryByOrderNo"
+					],
+					"query": [
+						{
+							"key": "OrderNo",
+							"value": "10000001"
+						}
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}

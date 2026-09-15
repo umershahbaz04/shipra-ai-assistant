@@ -1,0 +1,48 @@
+export const SecurityEnglish = {
+  SETING_SECURITY_TEXT: "Security",
+  SETING_SECURITY_PASSWORD: "Password",
+  SETING_SECURITY_CURRENT_PASSWORD: "Current Password",
+  SETING_SECURITY_NEW_PASSWORD: "New Password",
+  SETING_SECURITY_CONFIRM_NEW_PASSWORD: "Confirm New Password",
+  SETING_SECURITY_API_ACCESS: "Api Access",
+  SETING_SECURITY_ROTATE: "Rotate",
+  SETING_SECURITY_CLIENT_PUBLIC_KEY: "Client Public Key",
+  SETING_SECURITY_CLIENT_Secret_KEY: "Client Secret Key",
+  SETING_SECURITY_CLIENT_ENCRYPTED_KEY: "Client Encrypted Key",
+};
+export const SecurityArabic = {
+  SETING_SECURITY_TEXT: "حماية",
+  SETING_SECURITY_PASSWORD: "كلمة المرور",
+  SETING_SECURITY_CURRENT_PASSWORD: "كلمة المرور الحالية",
+  SETING_SECURITY_NEW_PASSWORD: "كلمة المرور الجديدة",
+  SETING_SECURITY_CONFIRM_NEW_PASSWORD: "تأكيد كلمة المرور",
+  SETING_SECURITY_API_ACCESS: "وصول API",
+  SETING_SECURITY_ROTATE: "تدوير",
+  SETING_SECURITY_CLIENT_PUBLIC_KEY: "المفتاح العام للعميل",
+  SETING_SECURITY_CLIENT_Secret_KEY: "المفتاح السري للعميل",
+  SETING_SECURITY_CLIENT_ENCRYPTED_KEY: "المفتاح المشفر للعميل",
+};
+export const SecurityChines = {
+  SETING_SECURITY_TEXT: "Security",
+  SETING_SECURITY_PASSWORD: "密码",
+  SETING_SECURITY_CURRENT_PASSWORD: "当前密码",
+  SETING_SECURITY_NEW_PASSWORD: "新密码",
+  SETING_SECURITY_CONFIRM_NEW_PASSWORD: "确认密码",
+  SETING_SECURITY_API_ACCESS: "API 访问",
+  SETING_SECURITY_ROTATE: "旋转 ",
+  SETING_SECURITY_CLIENT_PUBLIC_KEY: "客户端公钥 ",
+  SETING_SECURITY_CLIENT_Secret_KEY: "客户端密钥 ",
+  SETING_SECURITY_CLIENT_ENCRYPTED_KEY: "客户端加密密钥",
+};
+export const SecurityUrdu = {
+  SETING_SECURITY_TEXT: "سیکیورٹی",
+  SETING_SECURITY_PASSWORD: "پاس ورڈ",
+  SETING_SECURITY_CURRENT_PASSWORD: "موجودہ پاس ورڈ",
+  SETING_SECURITY_NEW_PASSWORD: "نیا پاس ورڈ",
+  SETING_SECURITY_CONFIRM_NEW_PASSWORD: "نیا پاس ورڈ تصدیق کریں",
+  SETING_SECURITY_API_ACCESS: "ای پی آئی رسائی",
+  SETING_SECURITY_ROTATE: "موڑیں",
+  SETING_SECURITY_CLIENT_PUBLIC_KEY: "کلائنٹ کا عوامی کلید",
+  SETING_SECURITY_CLIENT_Secret_KEY: "کلائنٹ کا خفیہ کلید",
+  SETING_SECURITY_CLIENT_ENCRYPTED_KEY: "کلائنٹ کا انکرپٹڈ کلید",
+};

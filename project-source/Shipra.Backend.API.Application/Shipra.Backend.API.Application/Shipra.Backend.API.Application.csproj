@@ -1,0 +1,87 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net7.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="DTOs\StoreUseCase\Requests\**" />
+    <Compile Remove="Features\DeliveryNoteFeature\Query\GetAllDriverExpenseForMobileServices\**" />
+    <Compile Remove="Features\InventorySalesFeatures\Command\**" />
+    <EmbeddedResource Remove="DTOs\StoreUseCase\Requests\**" />
+    <EmbeddedResource Remove="Features\DeliveryNoteFeature\Query\GetAllDriverExpenseForMobileServices\**" />
+    <EmbeddedResource Remove="Features\InventorySalesFeatures\Command\**" />
+    <None Remove="DTOs\StoreUseCase\Requests\**" />
+    <None Remove="Features\DeliveryNoteFeature\Query\GetAllDriverExpenseForMobileServices\**" />
+    <None Remove="Features\InventorySalesFeatures\Command\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Services\Interfaces\ISMSService1.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="DTOs\DeliveryNoteUseCase\Request\" />
+    <Folder Include="DTOs\OrderNoteUseCase\Response\" />
+    <Folder Include="DTOs\ProductStationUseCase\Request\" />
+    <Folder Include="Features\CommonFeature\Query\" />
+    <Folder Include="Features\CountryFeatures\Commands\CreateCountry\" />
+    <Folder Include="Features\CountryFeatures\Commands\DeleteCountry\" />
+    <Folder Include="Features\CountryFeatures\Commands\UpdateCountry\" />
+    <Folder Include="Features\InventorySalesFeatures\Commands\" />
+    <Folder Include="Features\InvoiceFeature\Command\" />
+    <Folder Include="Features\ReturnFeatures\Query\ReturnTrackingHistory\" />
+    <Folder Include="Services\Common\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AutoMapper" />
+    <PackageReference Include="AWSSDK.CognitoIdentityProvider" />
+    <PackageReference Include="BouncyCastle.NetCore" />
+    <PackageReference Include="EPPlus" />
+    <PackageReference Include="FluentValidation" />
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Net.Client" />
+    <PackageReference Include="Grpc.Tools">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Hangfire.Core" />
+    <PackageReference Include="itext7" />
+    <PackageReference Include="itext7.bouncy-castle-adapter" />
+    <PackageReference Include="itext7.bouncy-castle-fips-adapter" />
+    <PackageReference Include="itext7.pdfhtml" />
+    <PackageReference Include="libphonenumber-csharp" />
+    <PackageReference Include="MediatR" />
+    <PackageReference Include="Microsoft.AspNetCore.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.AspNetCore.Http.Abstractions" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Core" /> 
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Formatters.Json" /> 
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <PackageReference Include="Nancy" />
+    <PackageReference Include="Net.Codecrete.QrCodeGenerator" />
+    <PackageReference Include="NetBarcode" />
+    <PackageReference Include="NPOI" />
+    <PackageReference Include="QRCoder" />
+    <PackageReference Include="SendGrid" />
+    <PackageReference Include="ShopifySharp" />
+    <PackageReference Include="ShopifySharp.Extensions.DependencyInjection" />
+    <PackageReference Include="Stripe.net" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
+    <PackageReference Include="System.IO.FileSystem.Primitives" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Shipra.Backend.API.Security\Shipra.Backend.API.Security.csproj" />
+    <ProjectReference Include="..\src\Shipra.Backend.API.Core\Shipra.Backend.API.Core.csproj" />
+    <!--<FrameworkReference Include="Microsoft.AspNetCore.App" />-->
+  </ItemGroup>
+
+</Project>

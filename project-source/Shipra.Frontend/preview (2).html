@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Shipra - Sync Policies Prototype</title>
+<style>
+  :root{
+    --primary:#4a37b8;
+    --primary-2:#5a46cf;
+    --primary-soft:#f2efff;
+    --border:#dedee7;
+    --border-2:#ececf2;
+    --text:#22242a;
+    --muted:#6f7280;
+    --sidebar:#f4f4f6;
+    --bg:#f7f7f9;
+    --white:#fff;
+    --green:#1d9b5a;
+    --danger:#d94747;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Inter, Lato, Arial, sans-serif;color:var(--text);background:var(--bg);font-size:13px}
+  .app{display:flex;min-height:100vh}
+  .sidebar{width:228px;background:#f3f3f5;border-right:1px solid #d8d8df;position:fixed;top:0;left:0;bottom:0;overflow:auto}
+  .brand{height:82px;display:flex;align-items:center;padding:18px 18px 14px 16px}
+  .brand img{width:116px;height:auto;display:block}
+  .nav-group{padding:0 0 10px}
+  .nav-item{height:30px;display:flex;align-items:center;gap:13px;padding:0 17px;color:#222;font-weight:600;cursor:pointer}
+  .nav-item svg{width:17px;height:17px;stroke:#111;stroke-width:1.7;fill:none}
+  .nav-item:hover{background:#eae9ef}
+  .nav-item.active{background:#e6e3f4;color:var(--primary)}
+  .nav-item.active svg{stroke:var(--primary)}
+  .nav-item.indent{padding-left:60px;font-weight:500;height:29px}
+  .nav-item.indent.active{font-weight:600}
+  .chev{margin-left:auto;color:#8d8f98}
+
+  .main{margin-left:228px;width:calc(100% - 228px);min-height:100vh}
+  .topbar{height:60px;background:#fafafa;border-bottom:1px solid #ececf0;display:flex;align-items:center;padding:0 12px 0 8px;position:sticky;top:0;z-index:20}
+  .collapse{width:24px;height:24px;border-radius:50%;background:#fff;border:1px solid #eee;display:flex;align-items:center;justify-content:center;color:#999;margin-left:-20px;margin-right:8px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+  .page-title{font-size:17px;font-weight:700;margin-right:auto}
+  .top-actions{display:flex;align-items:center;gap:10px}
+  .country{width:143px;height:30px;background:white;border:1px solid #cfcfd7;border-radius:4px;color:#696b73;display:flex;align-items:center;justify-content:space-between;padding:0 10px;font-size:11px}
+  .small-chip{height:30px;background:#fff;border:1px solid #d6d6de;border-radius:4px;padding:0 8px;display:flex;align-items:center;gap:5px}
+  .charge{height:28px;background:var(--primary);color:#fff;padding:0 13px;border-radius:4px;border:0;display:flex;align-items:center;gap:6px;font-weight:600;font-size:11px}
+  .icon-btn{width:28px;height:28px;display:flex;align-items:center;justify-content:center;color:#575a63}
+  .avatar{width:28px;height:28px;border-radius:50%;background:#ffcfaa;display:flex;align-items:center;justify-content:center;font-size:15px}
+
+  .content{padding:10px 8px 30px}
+  .panel{background:#fff;border:1px solid #d8d8df;border-radius:5px;min-height:calc(100vh - 80px);overflow:hidden}
+  .panel-toolbar{height:43px;border-bottom:1px solid var(--border-2);display:flex;align-items:center;padding:0 8px 0 14px;gap:8px}
+  .search{height:30px;border:1px solid #d5d5dc;border-radius:4px;display:flex;align-items:center;padding:0 10px;gap:7px;width:260px;color:#9a9ca5}
+  .search input{border:0;outline:0;width:100%;font-size:12px}
+  .spacer{flex:1}
+  .btn{height:30px;border-radius:4px;border:1px solid #cfcfd8;background:#fff;color:#333;padding:0 12px;font-weight:600;font-size:11px;cursor:pointer}
+  .btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+  .btn.primary:hover{background:#3d2da2}
+  .btn.ghost{background:#fff}
+  .btn.danger{color:#c43434;border-color:#e7bcbc}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+
+  table{border-collapse:collapse;width:100%}
+  thead th{height:34px;border-bottom:1px solid #dddde4;text-align:left;font-size:11px;color:#41434a;font-weight:700;padding:0 12px;white-space:nowrap}
+  tbody td{height:52px;border-bottom:1px solid #f0f0f3;padding:0 12px;font-size:12px;vertical-align:middle}
+  tbody tr:hover{background:#fafafe}
+  .status{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:14px;background:#eaf7f0;color:#1b7e4d;font-weight:700;font-size:10px}
+  .status.paused{background:#fff4e7;color:#a96a00}
+  .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+  .channel{display:flex;align-items:center;gap:8px;font-weight:700}
+  .logo-box{width:28px;height:28px;border-radius:6px;border:1px solid #e2e2e8;display:flex;align-items:center;justify-content:center;background:#fff;font-weight:800;font-size:10px}
+  .source-stack{display:flex;gap:4px;flex-wrap:wrap}
+  .tag{background:#f3f3f7;border:1px solid #e2e2e8;padding:3px 7px;border-radius:10px;font-size:10px;color:#555861}
+  .kebab{font-size:18px;color:#777;cursor:pointer}
+  .empty{height:440px;display:flex;align-items:center;justify-content:center;color:#858791;flex-direction:column;gap:7px}
+  .empty strong{color:#4f5159}
+
+  .drawer{position:fixed;top:0;right:-880px;width:860px;height:100vh;background:#fff;z-index:60;box-shadow:-10px 0 30px rgba(28,29,36,.15);transition:right .28s ease;display:flex;flex-direction:column}
+  .drawer.open{right:0}
+  .overlay{position:fixed;inset:0;background:rgba(28,26,45,.30);z-index:50;opacity:0;pointer-events:none;transition:.25s}
+  .overlay.show{opacity:1;pointer-events:auto}
+  .drawer-header{height:64px;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 22px}
+  .drawer-header h2{font-size:17px;margin:0;font-weight:750}
+  .close{margin-left:auto;width:30px;height:30px;border:0;background:#f5f5f8;border-radius:50%;font-size:18px;cursor:pointer;color:#62646d}
+  .stepper{height:74px;border-bottom:1px solid var(--border-2);display:flex;align-items:center;padding:0 24px;gap:0;background:#fcfcfd}
+  .step{display:flex;align-items:center;min-width:138px;position:relative;color:#999ba4;font-size:11px;font-weight:600}
+  .step:not(:last-child):after{content:"";height:1px;background:#dddde5;width:32px;margin:0 10px}
+  .step-circle{width:26px;height:26px;border-radius:50%;border:1px solid #cfcfd8;background:#fff;display:flex;align-items:center;justify-content:center;margin-right:7px;font-size:11px;font-weight:700}
+  .step.active{color:var(--primary)}
+  .step.active .step-circle{background:var(--primary);color:#fff;border-color:var(--primary)}
+  .step.done{color:#4a4c53}
+  .step.done .step-circle{background:#e8e4ff;border-color:#cfc6ff;color:var(--primary)}
+  .drawer-body{flex:1;overflow:auto;padding:22px 26px 90px}
+  .drawer-footer{height:64px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:0 22px;background:#fff;position:absolute;left:0;right:0;bottom:0}
+  .section-title{font-size:16px;font-weight:750;margin-bottom:5px}
+  .section-sub{font-size:12px;color:#777a83;margin-bottom:19px;line-height:1.45}
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .field label{font-size:11px;color:#555861;font-weight:700;display:block;margin-bottom:6px}
+  .field input,.field select{height:36px;border:1px solid #d2d2da;border-radius:4px;width:100%;padding:0 10px;background:#fff;font-size:12px;outline:none}
+  .field input:focus,.field select:focus{border-color:#8174d8;box-shadow:0 0 0 2px #eeeaff}
+  .radio-cards{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .radio-card{border:1px solid #d9d9e2;border-radius:7px;padding:14px;cursor:pointer;display:flex;gap:10px;background:#fff}
+  .radio-card.selected{border-color:var(--primary);background:#faf9ff;box-shadow:0 0 0 1px var(--primary) inset}
+  .radio-card input{accent-color:var(--primary);margin-top:2px}
+  .radio-card strong{font-size:12px;display:block;margin-bottom:3px}
+  .radio-card p{margin:0;color:#777a84;font-size:11px;line-height:1.4}
+  .divider{height:1px;background:#eeeef2;margin:20px 0}
+  .station-head{display:flex;align-items:center;margin-bottom:8px}
+  .station-head strong{font-size:12px}
+  .station-head span{margin-left:auto;color:#858791;font-size:11px}
+  .station-list{border:1px solid #dcdce4;border-radius:6px;overflow:hidden}
+  .station-row{min-height:48px;border-bottom:1px solid #eeeef2;display:grid;grid-template-columns:34px 1fr 130px 100px;align-items:center;padding:0 12px}
+  .station-row:last-child{border-bottom:0}
+  .station-row input{accent-color:var(--primary)}
+  .station-name{font-weight:700;font-size:12px}
+  .station-code{font-size:10px;color:#898b94;margin-top:2px}
+  .qty{text-align:right;font-weight:700}
+  .qty small{display:block;color:#91939b;font-weight:500;font-size:9px}
+  .priority select{height:28px;border:1px solid #d7d7de;border-radius:4px;width:82px;font-size:11px}
+  .summary-bar{margin-top:12px;background:#f7f7fa;border:1px solid #e1e1e8;border-radius:6px;padding:12px 14px;display:flex;align-items:center}
+  .summary-bar strong{font-size:13px}
+  .summary-bar .sum{margin-left:auto;color:var(--primary);font-size:16px;font-weight:800}
+  .toggle-row{display:flex;align-items:center;min-height:54px;border-bottom:1px solid #eeeef2}
+  .toggle-row:last-child{border-bottom:0}
+  .toggle-copy{flex:1}
+  .toggle-copy strong{display:block;font-size:12px;margin-bottom:3px}
+  .toggle-copy span{font-size:10.5px;color:#7a7c85}
+  .switch{position:relative;width:39px;height:21px;flex:none}
+  .switch input{display:none}
+  .slider{position:absolute;inset:0;background:#cfd0d8;border-radius:20px;cursor:pointer;transition:.2s}
+  .slider:before{content:"";position:absolute;width:17px;height:17px;left:2px;top:2px;background:white;border-radius:50%;transition:.2s;box-shadow:0 1px 2px rgba(0,0,0,.18)}
+  .switch input:checked + .slider{background:var(--primary)}
+  .switch input:checked + .slider:before{transform:translateX(18px)}
+  .rule-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px}
+  .rule{border:1px solid #dfdfe6;border-radius:6px;padding:10px}
+  .rule label{display:block;font-size:10px;color:#747781;margin-bottom:5px}
+  .rule input{width:100%;height:32px;border:1px solid #d4d4dc;border-radius:4px;padding:0 8px}
+  .calc{background:#f7f6ff;border:1px solid #dfdafd;border-radius:7px;padding:14px;margin-top:14px}
+  .calc-line{display:flex;justify-content:space-between;margin:5px 0;font-size:11px;color:#666975}
+  .calc-line.result{border-top:1px solid #d9d2fa;padding-top:10px;margin-top:10px;font-size:13px;color:var(--primary);font-weight:800}
+  .product-filter{display:flex;gap:8px;margin-bottom:10px}
+  .product-filter input{height:32px;border:1px solid #d7d7de;border-radius:4px;padding:0 10px;flex:1}
+  .prod-table{border:1px solid #dedee5;border-radius:6px;overflow:hidden}
+  .prod-row{display:grid;grid-template-columns:38px 1.5fr 1fr 100px 92px;align-items:center;min-height:48px;border-bottom:1px solid #eeeeF2;padding:0 10px}
+  .prod-row.header{min-height:34px;background:#fafafa;font-size:10px;font-weight:700;color:#666973}
+  .prod-row:last-child{border-bottom:0}
+  .prod-row input{accent-color:var(--primary)}
+  .review-card{border:1px solid #dddde5;border-radius:7px;margin-bottom:12px;overflow:hidden}
+  .review-title{height:38px;background:#fafafa;border-bottom:1px solid #eeeef2;padding:0 12px;display:flex;align-items:center;font-weight:750;font-size:11px}
+  .review-grid{display:grid;grid-template-columns:1fr 1fr;gap:0}
+  .review-item{padding:11px 12px;border-bottom:1px solid #f1f1f4}
+  .review-item:nth-child(odd){border-right:1px solid #f1f1f4}
+  .review-item span{display:block;font-size:9.5px;color:#8a8c95;margin-bottom:3px}
+  .review-item strong{font-size:11.5px}
+  .success-box{background:#eef8f3;border:1px solid #cbead9;border-radius:7px;padding:12px;color:#237a4c;font-size:11px;line-height:1.45}
+  .hidden{display:none!important}
+  @media(max-width:1100px){.drawer{width:760px}.step{min-width:115px}.sidebar{width:205px}.main{margin-left:205px;width:calc(100% - 205px)}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQ5IiBoZWlnaHQ9IjE2MSIgdmlld0JveD0iMCAwIDY0OSAxNjEiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGQ9Ik0yMjUuMzYzIDQ0Ljc1NDFDMjI4LjIxNSA0NC43NTQxIDIzMS4xMjUgNDQuODY4MyAyMzQuMDkyIDQ1LjA5NjVDMjM3LjA1OCA0NS4zMjQ3IDIzOS45NjggNDUuNjY3IDI0Mi44MjEgNDYuMTIzNEMyNDUuNzg3IDQ2LjU3OTggMjQ4LjU4MyA0Ny4xNTA0IDI1MS4yMDcgNDcuODM1QzI1My45NDYgNDguNTE5NiAyNTYuMzk5IDQ5LjI2MTMgMjU4LjU2NyA1MC4wNlY3OC45ODU2QzI1Ni43NDIgNzguMDcyOCAyNTQuNTc0IDc3LjIxNyAyNTIuMDYzIDc2LjQxODNDMjQ5LjY2NyA3NS41MDU0IDI0Ny4xIDc0Ljc2MzggMjQ0LjM2MSA3NC4xOTMyQzI0MS42MjMgNzMuNTA4NiAyMzguODg0IDcyLjk5NTEgMjM2LjE0NiA3Mi42NTI4QzIzMy40MDcgNzIuMzEwNSAyMzAuODk3IDcyLjEzOTMgMjI4LjYxNSA3Mi4xMzkzQzIyNC41MDcgNzIuMTM5MyAyMjIuNDUzIDcyLjk5NTEgMjIyLjQ1MyA3NC43MDY3QzIyMi40NTMgNzYuNTMyNCAyMjUuNzYyIDc4LjE4NjkgMjMyLjM4IDc5LjY3MDNDMjM4LjE5OSA4MS4wMzk1IDI0My4xNjMgODIuNTc5OSAyNDcuMjcxIDg0LjI5MTVDMjUxLjM3OSA4NS44ODkgMjU0LjY4OCA4Ny44Mjg4IDI1Ny4xOTggOTAuMTEwOUMyNTkuODIyIDkyLjM5MyAyNjEuNzA1IDk1LjAxNzQgMjYyLjg0NiA5Ny45ODQxQzI2My45ODcgMTAwLjk1MSAyNjQuNTU4IDEwNC4zNzQgMjY0LjU1OCAxMDguMjU0QzI2NC41NTggMTE3LjE1NCAyNjAuOTA2IDEyNC4wNTcgMjUzLjYwNCAxMjguOTY0QzI0Ni40MTUgMTMzLjc1NiAyMzYuMjAzIDEzNi4xNTIgMjIyLjk2NiAxMzYuMTUyQzIxNy4yNjEgMTM2LjE1MiAyMTEuNjEzIDEzNS42MzkgMjA2LjAyMiAxMzQuNjEyQzIwMC41NDUgMTMzLjY5OSAxOTUuNDEgMTMyLjM4NyAxOTAuNjE4IDEzMC42NzVWMTAwLjcyM0MxOTIuNzg2IDEwMS44NjQgMTk1LjIzOSAxMDIuOTQ4IDE5Ny45NzcgMTAzLjk3NUMyMDAuNzE2IDEwNS4wMDIgMjAzLjUxMiAxMDUuOTE0IDIwNi4zNjQgMTA2LjcxM0MyMDkuMzMxIDEwNy4zOTggMjEyLjI0MSAxMDcuOTY4IDIxNS4wOTMgMTA4LjQyNUMyMTcuOTQ2IDEwOC44ODEgMjIwLjQ1NiAxMDkuMTA5IDIyMi42MjQgMTA5LjEwOUMyMjcuOTg3IDEwOS4xMDkgMjMwLjY2OSAxMDguMjU0IDIzMC42NjkgMTA2LjU0MkMyMzAuNjY5IDEwNS41MTUgMjI5LjY0MiAxMDQuNzE2IDIyNy41ODggMTA0LjE0NkMyMjUuNTM0IDEwMy41NzUgMjIyLjczOCAxMDIuODM0IDIxOS4yMDEgMTAxLjkyMUMyMDguMjQ3IDk5LjI5NjMgMjAwLjM3NCA5NS43MDIgMTk1LjU4MSA5MS4xMzc4QzE5MC45MDMgODYuNTczNiAxODguNTY0IDgwLjUyNiAxODguNTY0IDcyLjk5NTFDMTg4LjU2NCA2NC4wOTQ5IDE5MS43NTkgNTcuMTkxNiAxOTguMTQ5IDUyLjI4NTFDMjA0LjUzOSA0Ny4yNjQ1IDIxMy42MSA0NC43NTQxIDIyNS4zNjMgNDQuNzU0MVpNMjY5Ljg1NyAxMi4wNjMxSDMwMy4wNjFWNjMuNDEwM0MzMDcuNjI2IDUwLjk3MjkgMzE2LjA2OSA0NC43NTQxIDMyOC4zOTMgNDQuNzU0MUMzMzcuNDA3IDQ0Ljc1NDEgMzQ0LjM2NyA0OC4wMDYxIDM0OS4yNzQgNTQuNTEwMUMzNTQuMjk1IDYxLjAxNDEgMzU2LjgwNSA3MC4xOTk2IDM1Ni44MDUgODIuMDY2NVYxMzMuNTg1SDMyMy42Vjg2Ljg1ODlDMzIzLjYgNzYuNzAzNSAzMjAuMTc3IDcxLjYyNTkgMzEzLjMzMSA3MS42MjU5QzMwNi40ODUgNzEuNjI1OSAzMDMuMDYxIDc2LjcwMzUgMzAzLjA2MSA4Ni44NTg5VjEzMy41ODVIMjY5Ljg1N1YxMi4wNjMxWk0zNjIuMTA5IDI1LjU4NDVDMzYyLjEwOSAyMy41MzA2IDM2Mi41NjYgMjEuNTkwOSAzNjMuNDc5IDE5Ljc2NTJDMzY0LjUwNiAxNy45Mzk1IDM2NS44MTggMTYuMzQyIDM2Ny40MTUgMTQuOTcyOEMzNjkuMDEzIDEzLjYwMzUgMzcwLjg5NSAxMi41MTk1IDM3My4wNjMgMTEuNzIwOEMzNzUuMzQ2IDEwLjkyMiAzNzcuNzQyIDEwLjUyMjcgMzgwLjI1MiAxMC41MjI3QzM4NS4zODcgMTAuNTIyNyAzODkuNjA5IDEyLjAwNiAzOTIuOTE4IDE0Ljk3MjhDMzk2LjM0MSAxNy44MjU0IDM5OC4wNTIgMjEuMzYyNiAzOTguMDUyIDI1LjU4NDVDMzk4LjA1MiAyOS44MDY0IDM5Ni4zNDEgMzMuNDAwNyAzOTIuOTE4IDM2LjM2NzRDMzg5LjYwOSAzOS4yMjAxIDM4NS4zODcgNDAuNjQ2NCAzODAuMjUyIDQwLjY0NjRDMzc3Ljc0MiA0MC42NDY0IDM3NS4zNDYgNDAuMjQ3IDM3My4wNjMgMzkuNDQ4M0MzNzAuODk1IDM4LjY0OTUgMzY5LjAxMyAzNy41NjU1IDM2Ny40MTUgMzYuMTk2M0MzNjUuODE4IDM0LjgyNyAzNjQuNTA2IDMzLjIyOTYgMzYzLjQ3OSAzMS40MDM5QzM2Mi41NjYgMjkuNTc4MiAzNjIuMTA5IDI3LjYzODQgMzYyLjEwOSAyNS41ODQ1Wk0zNjMuNDc5IDQ3LjMyMTVIMzk2LjY4M1YxMzMuNTg1SDM2My40NzlWNDcuMzIxNVpNNDM1LjI3NCA0Ny4zMjE1VjY0LjQzNzNDNDM5LjcyNCA1MS4zMTUyIDQ0OC4yODIgNDQuNzU0MSA0NjAuOTQ3IDQ0Ljc1NDFDNDY2LjA4MiA0NC43NTQxIDQ3MC43NiA0NS44MzgxIDQ3NC45ODIgNDguMDA2MUM0NzkuMjA0IDUwLjE3NDEgNDgyLjc5OSA1My4yNTUgNDg1Ljc2NSA1Ny4yNDg2QzQ4OC43MzIgNjEuMjQyMyA0OTEuMDE0IDY2LjAzNDcgNDkyLjYxMiA3MS42MjU5QzQ5NC4zMjMgNzcuMjE3IDQ5NS4xNzkgODMuNDM1NyA0OTUuMTc5IDkwLjI4MkM0OTUuMTc5IDk3LjEyODMgNDk0LjMyMyAxMDMuNDA0IDQ5Mi42MTIgMTA5LjEwOUM0OTEuMDE0IDExNC43IDQ4OC42NzUgMTE5LjQ5MyA0ODUuNTk0IDEyMy40ODdDNDgyLjYyNyAxMjcuNDggNDc5LjAzMyAxMzAuNjE4IDQ3NC44MTEgMTMyLjlDNDcwLjcwMyAxMzUuMDY4IDQ2Ni4wODIgMTM2LjE1MiA0NjAuOTQ3IDEzNi4xNTJDNDQ5Ljc2NSAxMzYuMTUyIDQ0MS43NzggMTMwLjk2IDQzNi45ODUgMTIwLjU3N1YxNjAuNzk5SDQwMy43ODFWNDcuMzIxNUg0MzUuMjc0Wk00MzYuOTg1IDkwLjI4MkM0MzYuOTg1IDk1Ljk4NzMgNDM4LjA2OSAxMDAuNDk0IDQ0MC4yMzcgMTAzLjgwM0M0NDIuNTE5IDEwNi45OTggNDQ1LjYgMTA4LjU5NiA0NDkuNDggMTA4LjU5NkM0NTMuMjQ1IDEwOC41OTYgNDU2LjIxMiAxMDYuOTk4IDQ1OC4zOCAxMDMuODAzQzQ2MC42NjIgMTAwLjQ5NCA0NjEuODAzIDk1Ljk4NzMgNDYxLjgwMyA5MC4yODJDNDYxLjgwMyA4NC42OTA5IDQ2MC43MTkgODAuMjk3OCA0NTguNTUxIDc3LjEwMjlDNDU2LjM4MyA3My45MDggNDUzLjM1OSA3Mi4zMTA1IDQ0OS40OCA3Mi4zMTA1QzQ0NS42IDcyLjMxMDUgNDQyLjUxOSA3My45MDggNDQwLjIzNyA3Ny4xMDI5QzQzOC4wNjkgODAuMjk3OCA0MzYuOTg1IDg0LjY5MDkgNDM2Ljk4NSA5MC4yODJaTTUwMC40MTEgNDcuMzIxNUg1MzMuNjE2VjY3LjE3NThDNTM2LjU4MyA1OS44NzMxIDU0MC42OSA1NC4zMzkgNTQ1LjkzOSA1MC41NzM1QzU1MS4zMDIgNDYuNjkzOSA1NTcuNzQ5IDQ0Ljc1NDEgNTY1LjI4IDQ0Ljc1NDFWNzMuMTY2M0M1NTQuODk2IDczLjE2NjMgNTQ3LjAyMyA3NS4yNzcyIDU0MS42NiA3OS40OTkxQzUzNi4yOTcgODMuNzIxIDUzMy42MTYgODkuNzY4NSA1MzMuNjE2IDk3LjY0MThWMTMzLjU4NUg1MDAuNDExVjQ3LjMyMTVaTTYxMi4wMjYgMTE4LjE4MUM2MDkuOTcyIDEyMy44ODYgNjA2LjcyIDEyOC4zMzYgNjAyLjI3IDEzMS41MzFDNTk3LjkzNCAxMzQuNjEyIDU5Mi44NTYgMTM2LjE1MiA1ODcuMDM3IDEzNi4xNTJDNTgzLjM4NiAxMzYuMTUyIDU4MC4wMTkgMTM1LjQ2OCA1NzYuOTM5IDEzNC4wOThDNTczLjk3MiAxMzIuODQzIDU3MS40MDUgMTMxLjA3NSA1NjkuMjM3IDEyOC43OTJDNTY3LjA2OSAxMjYuNTEgNTY1LjM1NyAxMjMuNzcyIDU2NC4xMDIgMTIwLjU3N0M1NjIuOTYxIDExNy4zODIgNTYyLjM5IDExMy44NDUgNTYyLjM5IDEwOS45NjVDNTYyLjM5IDEwMS43NSA1NjUuMDcyIDk1LjMwMjYgNTcwLjQzNSA5MC42MjQzQzU3NS43OTggODUuODMxOSA1ODMuMTU3IDgzLjQzNTcgNTkyLjUxNCA4My40MzU3QzU5NC45MSA4My40MzU3IDU5Ny43NjMgODMuNjA2OSA2MDEuMDcyIDgzLjk0OTJDNjA0LjM4MSA4NC4yOTE1IDYwOC4wMzIgODQuODA1IDYxMi4wMjYgODUuNDg5NlY4NC44MDVDNjEyLjAyNiA4MS4xNTM2IDYxMC44MjggNzguNTI5MiA2MDguNDMyIDc2LjkzMTdDNjA2LjE1IDc1LjMzNDMgNjAyLjMyNyA3NC41MzU1IDU5Ni45NjQgNzQuNTM1NUM1ODguNjM0IDc0LjUzNTUgNTc5LjU2MyA3Ni4yNDcxIDU2OS43NSA3OS42NzAzVjUxLjYwMDRDNTcyLjQ4OSA1MC42ODc2IDU3NS4zOTggNDkuODg4OSA1NzguNDc5IDQ5LjIwNDJDNTgxLjU2IDQ4LjQwNTUgNTg0LjY5OCA0Ny43Nzc5IDU4Ny44OTMgNDcuMzIxNUM1OTEuMDg4IDQ2Ljc1MSA1OTQuMjI2IDQ2LjM1MTYgNTk3LjMwNiA0Ni4xMjM0QzYwMC4zODcgNDUuNzgxMSA2MDMuMTgzIDQ1LjYwOTkgNjA1LjY5MyA0NS42MDk5QzYxMS44NTUgNDUuNjA5OSA2MTcuMzMyIDQ2LjQ2NTcgNjIyLjEyNCA0OC4xNzczQzYyNy4wMzEgNDkuNzc0OCA2MzEuMTk2IDUyLjExMzkgNjM0LjYxOSA1NS4xOTQ4QzYzOC4wNDIgNTguMjc1NiA2NDAuNjY2IDYyLjA0MTEgNjQyLjQ5MiA2Ni40OTExQzY0NC4zMTggNzAuOTQxMiA2NDUuMjMgNzUuOTA0OCA2NDUuMjMgODEuMzgxOFYxMzMuNTg1SDYxMi4wMjZWMTE4LjE4MVpNNTk0LjczOSAxMDcuNzRDNTk0LjczOSAxMDkuNzk0IDU5NS4zNjcgMTExLjQ0OCA1OTYuNjIyIDExMi43MDRDNTk3Ljg3NyAxMTMuOTU5IDU5OS41MzEgMTE0LjU4NiA2MDEuNTg1IDExNC41ODZDNjA0LjY2NiAxMTQuNTg2IDYwNy4xNzYgMTEzLjI3NCA2MDkuMTE2IDExMC42NUM2MTEuMDU2IDEwNy45MTEgNjEyLjAyNiAxMDQuMzc0IDYxMi4wMjYgMTAwLjAzOFY5OS42OTU3QzYxMS40NTUgOTkuMjM5MyA2MTAuMDg2IDk5LjAxMSA2MDcuOTE4IDk5LjAxMUM2MDMuNjk2IDk5LjAxMSA2MDAuNDQ0IDk5LjgwOTggNTk4LjE2MiAxMDEuNDA3QzU5NS44OCAxMDIuODkxIDU5NC43MzkgMTA1LjAwMiA1OTQuNzM5IDEwNy43NFoiIGZpbGw9ImJsYWNrIi8+CjxnIGNsaXAtcGF0aD0idXJsKCNjbGlwMF8yMjNfMikiPgo8cGF0aCBkPSJNMTA0LjQ0OSA4Ni4yNzI4QzEwNS45MDUgODQuMjQzNCAxMDcuNDM0IDgyLjI2NjEgMTA4LjgxNyA4MC4xODQ3QzExMC43MzcgNzcuMjggMTEzLjMzNSA3Ni4xODIzIDExNi43OSA3Ni40MTQ5QzEyNi4yMjYgNzcuMTA0OSAxMzMuNjQ5IDczLjQ4OTIgMTM4Ljk3IDY1LjYxNDFDMTQ1LjU3MSA1NS44MDI2IDE0My4zOTEgNDIuMDkyIDEzMy45NzUgMzQuMTA4OEMxMjUuMzY1IDI2Ljc2MDcgMTEwLjcxOSAyNy4yMTMgMTAyLjU1NCAzNS4wNzVDOTQuODI1OCA0Mi40ODE4IDkyLjc4NzggNTIuNjYzOCA5Ny4xNTMzIDYyLjU2MjdDOTguMzY4MyA2NS4zMDQ5IDk4LjI2ODIgNjcuODE1MiA5Ni41MDAxIDcwLjI3OTRDOTMuMTg3OCA3NC44MTk1IDg5Ljk4NDEgNzkuNDM3NiA4Ni42MDk2IDgzLjk4NzhDODQuMzM3MyA4Ny4wNzgzIDgxLjMyNTEgODcuOTg4MSA3Ny43MzkxIDg2LjU2MjFDNTcuNTI3MyA3OC41NTk1IDM3LjM0MTQgNzAuNTIwNiAxNy4xNTU2IDYyLjQ4MThDMTMuOTQ3MyA2MS4yMTc2IDEyLjI5NyA1OC41NDY4IDEyLjM4MzUgNTUuMzY3M0MxMi40NzU2IDUyLjAyNyAxNC4yOTQ2IDQ5Ljg3NDEgMTguMTI2NSA0OC41MTAxQzM4LjcwNjQgNDEuMzkzMSA1OS4zMTIyIDM0LjIzOTggNzkuODkyMSAyNy4xMjI3QzEwMS42NDkgMTkuNTg4NyAxMjMuNDA2IDEyLjA1NDggMTQ1LjE4OSA0LjQ4NDU0QzE1MS45NjEgMi4xNTg2MyAxNTYuMjY3IDUuMjU2OTEgMTU2LjI1MyAxMi4zODkzQzE1NS44NzYgNTcuMTE3NSAxNTUuNTI1IDEwMS44MSAxNTUuMTc0IDE0Ni41MDFDMTU1LjE0IDE0OS4yMjUgMTU0LjcwOSAxNTEuNjYxIDE1Mi41NDQgMTUzLjQ1NUMxNDkuNDQ5IDE1Ni4wMDkgMTQ1LjAxMSAxNTUuNjE4IDE0Mi4yNDMgMTUyLjM2NEMxMjguMjUgMTM1LjkyMyAxMTQuMjgzIDExOS40NDYgMTAwLjM0MiAxMDIuOTMzQzk3LjQwOTIgOTkuNDQ5NiA5Ny4zNjExIDk2LjIyODIgMTAwLjAwMyA5Mi40Njk2QzEwMS40MzMgOTAuNDc2NSAxMDIuOTQxIDg4LjM3NDYgMTA0LjQ0OSA4Ni4yNzI4WiIgZmlsbD0iIzQ3NEFEOSIvPgo8L2c+CjxkZWZzPgo8Y2xpcFBhdGggaWQ9ImNsaXAwXzIyM18yIj4KPHJlY3Qgd2lkdGg9IjE2MCIgaGVpZ2h0PSIxNTgiIGZpbGw9IndoaXRlIi8+CjwvY2xpcFBhdGg+CjwvZGVmcz4KPC9zdmc+Cg==" alt="Shipra"></div>
+    <div class="nav-group">
+      <div class="nav-item"><span>◫</span>Dashboards</div>
+      <div class="nav-item"><span>◉</span>Analytics</div>
+      <div class="nav-item"><span>♙</span>Stores / Shipper</div>
+      <div class="nav-item active"><span>◇</span>Products <span class="chev">⌃</span></div>
+      <div class="nav-item indent">Product Inventory</div>
+      <div class="nav-item indent">Low Inventory</div>
+      <div class="nav-item indent">Inventory Sales</div>
+      <div class="nav-item indent">Sale Channel Product</div>
+      <div class="nav-item indent active">Sync Policies</div>
+      <div class="nav-item indent">Product Station</div>
+      <div class="nav-item"><span>▣</span>Leads <span class="chev">⌄</span></div>
+      <div class="nav-item"><span>▤</span>Performance Report</div>
+      <div class="nav-item"><span>▽</span>Orders <span class="chev">⌄</span></div>
+      <div class="nav-item"><span>♧</span>Shipments <span class="chev">⌄</span></div>
+      <div class="nav-item"><span>▱</span>Contracts <span class="chev">⌄</span></div>
+      <div class="nav-item"><span>♙</span>Carrier Returns <span class="chev">⌄</span></div>
+      <div class="nav-item"><span>▰</span>My Carrier <span class="chev">⌄</span></div>
+      <div class="nav-item"><span>♙</span>Accounts <span class="chev">⌄</span></div>
+      <div class="nav-item"><span>◉</span>Integrations <span class="chev">⌄</span></div>
+      <div class="nav-item"><span>⚙</span>App Settings <span class="chev">⌄</span></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="collapse">‹</div>
+      <div class="page-title">Sync Policies</div>
+      <div class="top-actions">
+        <div class="country"><span>Country</span><span>⌄</span></div>
+        <div class="small-chip">🇺🇸 <span>EN</span></div>
+        <button class="charge">▤ &nbsp; Charge</button>
+        <div class="icon-btn">♧</div><div class="icon-btn">?</div><div class="avatar">👨🏽</div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="panel">
+        <div class="panel-toolbar">
+          <div class="search">⌕ <input id="policySearch" placeholder="Search policy, channel or station" oninput="filterPolicies()"></div>
+          <button class="btn ghost">Status ▾</button>
+          <button class="btn ghost">Channel ▾</button>
+          <div class="spacer"></div>
+          <button class="btn primary" onclick="openWizard()">+ Create Sync Policy</button>
+        </div>
+        <table>
+          <thead>
+            <tr><th style="width:34px"><input type="checkbox"></th><th>Policy Name</th><th>Sales Channel</th><th>Inventory Source</th><th>Products</th><th>Inventory Rule</th><th>Status</th><th>Last Sync</th><th style="width:45px"></th></tr>
+          </thead>
+          <tbody id="policyRows">
+            <tr data-search="amazon uae standard stock amazon dubai sharjah">
+              <td><input type="checkbox"></td><td><strong>Amazon UAE - Standard Stock</strong><div style="color:#8c8e97;font-size:10px;margin-top:3px">Default Amazon inventory policy</div></td>
+              <td><div class="channel"><div class="logo-box">a</div>Amazon UAE</div></td>
+              <td><div class="source-stack"><span class="tag">Dubai Warehouse</span><span class="tag">Sharjah Warehouse</span></div></td>
+              <td>All products</td><td>Buffer 5 · Max 50</td><td><span class="status"><span class="dot"></span>Active</span></td><td>2 min ago</td><td class="kebab">⋮</td>
+            </tr>
+            <tr data-search="shopify retail stock shopify dubai mall">
+              <td><input type="checkbox"></td><td><strong>Shopify - Retail Stock</strong><div style="color:#8c8e97;font-size:10px;margin-top:3px">Online store stock policy</div></td>
+              <td><div class="channel"><div class="logo-box">S</div>Shopify</div></td>
+              <td><div class="source-stack"><span class="tag">Dubai Mall Store</span></div></td>
+              <td>3 collections</td><td>Buffer 2 · No max</td><td><span class="status"><span class="dot"></span>Active</span></td><td>6 min ago</td><td class="kebab">⋮</td>
+            </tr>
+            <tr data-search="noon wholesale noon sharjah">
+              <td><input type="checkbox"></td><td><strong>Noon - Wholesale</strong><div style="color:#8c8e97;font-size:10px;margin-top:3px">Selected wholesale SKUs</div></td>
+              <td><div class="channel"><div class="logo-box">N</div>Noon</div></td>
+              <td><div class="source-stack"><span class="tag">Sharjah Warehouse</span></div></td>
+              <td>428 products</td><td>Buffer 10 · Max 25</td><td><span class="status paused"><span class="dot"></span>Paused</span></td><td>Yesterday</td><td class="kebab">⋮</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div id="overlay" class="overlay" onclick="closeWizard()"></div>
+<div id="drawer" class="drawer">
+  <div class="drawer-header"><h2>Create Sync Policy</h2><button class="close" onclick="closeWizard()">×</button></div>
+  <div class="stepper" id="stepper"></div>
+  <div class="drawer-body">
+
+    <section class="wizard-step" data-step="1">
+      <div class="section-title">Policy details</div>
+      <div class="section-sub">Create a reusable rule that controls how products and inventory are synchronized with a sales channel.</div>
+      <div class="form-grid">
+        <div class="field"><label>Policy Name</label><input id="policyName" value="Amazon UAE - Standard Stock"></div>
+        <div class="field"><label>Sales Channel</label><select id="channel"><option>Amazon UAE</option><option>Noon UAE</option><option>Shopify</option><option>WooCommerce</option><option>TikTok Shop</option></select></div>
+      </div>
+      <div class="divider"></div>
+      <div class="section-title" style="font-size:14px">Apply policy to</div>
+      <div class="section-sub">You can keep one default policy per channel and create exceptions only where needed.</div>
+      <div class="radio-cards">
+        <label class="radio-card selected" onclick="selectRadioCard(this)"><input type="radio" name="scope" checked><div><strong>All products</strong><p>Use this as the default policy for every mapped product on the selected channel.</p></div></label>
+        <label class="radio-card" onclick="selectRadioCard(this)"><input type="radio" name="scope"><div><strong>Selected products</strong><p>Apply only to specific products, collections, brands or categories.</p></div></label>
+      </div>
+    </section>
+
+    <section class="wizard-step hidden" data-step="2">
+      <div class="section-title">Choose inventory source</div>
+      <div class="section-sub">Select the Shipra Product Stations whose available inventory should be published to this sales channel.</div>
+      <div class="radio-cards">
+        <label class="radio-card" onclick="sourceMode(this,'all')"><input type="radio" name="source"><div><strong>All Product Stations</strong><p>Combine available stock from every active inventory location.</p></div></label>
+        <label class="radio-card selected" onclick="sourceMode(this,'selected')"><input type="radio" name="source" checked><div><strong>Selected Product Stations</strong><p>Choose exactly which warehouses or stores can contribute stock.</p></div></label>
+      </div>
+      <div class="divider"></div>
+      <div class="station-head"><strong>Product Stations</strong><span id="stationCount">2 selected</span></div>
+      <div class="station-list">
+        <div class="station-row"><input class="stationCheck" type="checkbox" checked onchange="updateStationTotal()"><div><div class="station-name">Dubai Warehouse</div><div class="station-code">DXB-WH-01 · Warehouse</div></div><div class="priority"><select><option>Priority 1</option><option>Priority 2</option><option>Priority 3</option></select></div><div class="qty">4,250<small>available units</small></div></div>
+        <div class="station-row"><input class="stationCheck" type="checkbox" checked onchange="updateStationTotal()"><div><div class="station-name">Sharjah Warehouse</div><div class="station-code">SHJ-WH-01 · Warehouse</div></div><div class="priority"><select><option>Priority 2</option><option>Priority 1</option><option>Priority 3</option></select></div><div class="qty">2,180<small>available units</small></div></div>
+        <div class="station-row"><input class="stationCheck" type="checkbox" onchange="updateStationTotal()"><div><div class="station-name">Abu Dhabi Store</div><div class="station-code">AUH-ST-01 · Retail Store</div></div><div class="priority"><select><option>Priority 3</option><option>Priority 1</option><option>Priority 2</option></select></div><div class="qty">840<small>available units</small></div></div>
+        <div class="station-row"><input class="stationCheck" type="checkbox" onchange="updateStationTotal()"><div><div class="station-name">Dubai Mall Store</div><div class="station-code">DXB-MALL-01 · Retail Store</div></div><div class="priority"><select><option>Priority 4</option><option>Priority 1</option><option>Priority 2</option></select></div><div class="qty">125<small>available units</small></div></div>
+      </div>
+      <div class="summary-bar"><div><strong>Combined inventory source</strong><div style="font-size:10px;color:#858791;margin-top:3px">Calculated from the selected stations</div></div><div class="sum" id="stationTotal">6,430 units</div></div>
+      <div style="margin-top:10px;color:#858791;font-size:10px">Priority is stored for future allocation logic. Published quantity can still be the combined available inventory.</div>
+    </section>
+
+    <section class="wizard-step hidden" data-step="3">
+      <div class="section-title">Choose products</div>
+      <div class="section-sub">The policy can be used for all channel products or only selected items. Variants inherit the same policy unless you override them later.</div>
+      <div class="product-filter"><input placeholder="Search SKU, product or barcode"><button class="btn ghost">Category ▾</button><button class="btn ghost">Brand ▾</button></div>
+      <div class="prod-table">
+        <div class="prod-row header"><div><input type="checkbox" checked></div><div>Product</div><div>SKU</div><div>Available</div><div>Policy</div></div>
+        <div class="prod-row"><div><input type="checkbox" checked></div><div><strong>Classic Black T-Shirt</strong><div style="font-size:10px;color:#8a8c94">Black / M</div></div><div>TS-BLK-M</div><div>78</div><div><span class="tag">Default</span></div></div>
+        <div class="prod-row"><div><input type="checkbox" checked></div><div><strong>Classic Black T-Shirt</strong><div style="font-size:10px;color:#8a8c94">Black / L</div></div><div>TS-BLK-L</div><div>42</div><div><span class="tag">Default</span></div></div>
+        <div class="prod-row"><div><input type="checkbox" checked></div><div><strong>Leather Travel Bag</strong><div style="font-size:10px;color:#8a8c94">Brown</div></div><div>BAG-LTH-BRN</div><div>19</div><div><span class="tag">Default</span></div></div>
+        <div class="prod-row"><div><input type="checkbox" checked></div><div><strong>Wireless Keyboard</strong><div style="font-size:10px;color:#8a8c94">US Layout</div></div><div>KEY-US-01</div><div>114</div><div><span class="tag">Default</span></div></div>
+      </div>
+    </section>
+
+    <section class="wizard-step hidden" data-step="4">
+      <div class="section-title">Inventory sync rules</div>
+      <div class="section-sub">Control how Shipra converts available inventory into the quantity published on the selected sales channel.</div>
+      <div class="toggle-row"><div class="toggle-copy"><strong>Sync inventory</strong><span>Push available stock from Shipra to the sales channel.</span></div><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div>
+      <div class="toggle-row"><div class="toggle-copy"><strong>Set unavailable inventory to zero</strong><span>When available stock reaches the threshold, publish zero instead of leaving old stock on the channel.</span></div><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div>
+      <div class="rule-grid">
+        <div class="rule"><label>Safety Buffer</label><input id="buffer" type="number" value="5" oninput="recalc()"></div>
+        <div class="rule"><label>Minimum Publish Qty</label><input id="minQty" type="number" value="0" oninput="recalc()"></div>
+        <div class="rule"><label>Maximum Publish Qty</label><input id="maxQty" type="number" value="50" oninput="recalc()"></div>
+      </div>
+      <div class="calc">
+        <div style="font-weight:750;font-size:11px;margin-bottom:8px">Example calculation for TS-BLK-M</div>
+        <div class="calc-line"><span>Combined available inventory</span><strong>78</strong></div>
+        <div class="calc-line"><span>Safety buffer</span><strong id="calcBuffer">− 5</strong></div>
+        <div class="calc-line"><span>After buffer</span><strong id="afterBuffer">73</strong></div>
+        <div class="calc-line"><span>Maximum published quantity</span><strong id="calcMax">50</strong></div>
+        <div class="calc-line result"><span>Quantity sent to Amazon UAE</span><strong id="publishQty">50</strong></div>
+      </div>
+      <div class="divider"></div>
+      <div class="section-title" style="font-size:14px">Other sync settings</div>
+      <div class="toggle-row"><div class="toggle-copy"><strong>Sync product price</strong><span>Shipra becomes the source for channel price updates.</span></div><label class="switch"><input type="checkbox"><span class="slider"></span></label></div>
+      <div class="toggle-row"><div class="toggle-copy"><strong>Sync product information</strong><span>Push title, description and product attributes when changed.</span></div><label class="switch"><input type="checkbox"><span class="slider"></span></label></div>
+      <div class="toggle-row"><div class="toggle-copy"><strong>Sync product media</strong><span>Keep images and media aligned with the Shipra catalog.</span></div><label class="switch"><input type="checkbox"><span class="slider"></span></label></div>
+    </section>
+
+    <section class="wizard-step hidden" data-step="5">
+      <div class="section-title">Review & activate</div>
+      <div class="section-sub">Confirm the policy before Shipra starts applying it to channel products.</div>
+      <div class="review-card"><div class="review-title">Policy</div><div class="review-grid"><div class="review-item"><span>Policy Name</span><strong id="reviewName">Amazon UAE - Standard Stock</strong></div><div class="review-item"><span>Sales Channel</span><strong id="reviewChannel">Amazon UAE</strong></div><div class="review-item"><span>Scope</span><strong>All products</strong></div><div class="review-item"><span>Status after save</span><strong>Active</strong></div></div></div>
+      <div class="review-card"><div class="review-title">Inventory Source</div><div class="review-grid"><div class="review-item"><span>Source Type</span><strong>Selected Product Stations</strong></div><div class="review-item"><span>Selected Stations</span><strong id="reviewStations">Dubai Warehouse + Sharjah Warehouse</strong></div><div class="review-item"><span>Current Combined Stock</span><strong id="reviewTotal">6,430 units</strong></div><div class="review-item"><span>Allocation</span><strong>Priority based</strong></div></div></div>
+      <div class="review-card"><div class="review-title">Inventory Rules</div><div class="review-grid"><div class="review-item"><span>Inventory Sync</span><strong>Enabled</strong></div><div class="review-item"><span>Safety Buffer</span><strong id="reviewBuffer">5 units</strong></div><div class="review-item"><span>Minimum Qty</span><strong>0</strong></div><div class="review-item"><span>Maximum Qty</span><strong id="reviewMax">50 units</strong></div></div></div>
+      <div class="success-box"><strong>What happens after activation?</strong><br>Shipra calculates available quantity from the selected Product Stations, applies the buffer and min/max rules, then publishes the resulting quantity to the mapped sales-channel products.</div>
+    </section>
+
+  </div>
+  <div class="drawer-footer"><button class="btn ghost" id="backBtn" onclick="backStep()">Back</button><button class="btn primary" id="nextBtn" onclick="nextStep()">Continue</button></div>
+</div>
+
+<script>
+let currentStep=1;
+const labels=['Policy','Inventory Source','Products','Sync Rules','Review'];
+const stationQty=[4250,2180,840,125];
+function renderStepper(){
+  const s=document.getElementById('stepper');
+  s.innerHTML=labels.map((x,i)=>{
+    const n=i+1; const cls=n<currentStep?'done':n===currentStep?'active':'';
+    const mark=n<currentStep?'✓':n;
+    return `<div class="step ${cls}"><div class="step-circle">${mark}</div>${x}</div>`
+  }).join('');
+}
+function showStep(n){
+  currentStep=n;
+  document.querySelectorAll('.wizard-step').forEach(x=>x.classList.toggle('hidden',+x.dataset.step!==n));
+  renderStepper();
+  document.getElementById('backBtn').style.visibility=n===1?'hidden':'visible';
+  document.getElementById('nextBtn').textContent=n===5?'Activate Policy':'Continue';
+  if(n===5)refreshReview();
+}
+function openWizard(){document.getElementById('drawer').classList.add('open');document.getElementById('overlay').classList.add('show');showStep(1)}
+function closeWizard(){document.getElementById('drawer').classList.remove('open');document.getElementById('overlay').classList.remove('show')}
+function nextStep(){if(currentStep<5){showStep(currentStep+1)}else{activatePolicy()}}
+function backStep(){if(currentStep>1)showStep(currentStep-1)}
+function selectRadioCard(el){el.parentElement.querySelectorAll('.radio-card').forEach(x=>x.classList.remove('selected'));el.classList.add('selected');el.querySelector('input').checked=true}
+function sourceMode(el,mode){selectRadioCard(el)}
+function updateStationTotal(){
+  const checks=[...document.querySelectorAll('.stationCheck')]; let total=0,count=0,names=[];
+  const stationNames=['Dubai Warehouse','Sharjah Warehouse','Abu Dhabi Store','Dubai Mall Store'];
+  checks.forEach((c,i)=>{if(c.checked){total+=stationQty[i];count++;names.push(stationNames[i])}});
+  document.getElementById('stationTotal').textContent=total.toLocaleString()+' units';
+  document.getElementById('stationCount').textContent=count+' selected';
+  document.getElementById('reviewTotal').textContent=total.toLocaleString()+' units';
+  document.getElementById('reviewStations').textContent=names.length?names.join(' + '):'None';
+}
+function recalc(){
+  const available=78; const buffer=Math.max(0,+document.getElementById('buffer').value||0); const max=Math.max(0,+document.getElementById('maxQty').value||0); const min=Math.max(0,+document.getElementById('minQty').value||0);
+  const after=Math.max(0,available-buffer); let publish=max?Math.min(after,max):after; if(publish<=min) publish=0;
+  document.getElementById('calcBuffer').textContent='− '+buffer;document.getElementById('afterBuffer').textContent=after;document.getElementById('calcMax').textContent=max||'No limit';document.getElementById('publishQty').textContent=publish;
+}
+function refreshReview(){
+  document.getElementById('reviewName').textContent=document.getElementById('policyName').value||'Untitled Policy';
+  document.getElementById('reviewChannel').textContent=document.getElementById('channel').value;
+  document.getElementById('reviewBuffer').textContent=(+document.getElementById('buffer').value||0)+' units';
+  const m=+document.getElementById('maxQty').value||0;document.getElementById('reviewMax').textContent=m?m+' units':'No limit';
+  updateStationTotal();
+}
+function activatePolicy(){
+  const name=document.getElementById('policyName').value||'New Sync Policy';
+  const channel=document.getElementById('channel').value;
+  const checks=[...document.querySelectorAll('.stationCheck')]; const stationNames=['Dubai Warehouse','Sharjah Warehouse','Abu Dhabi Store','Dubai Mall Store'];
+  const names=checks.map((c,i)=>c.checked?stationNames[i]:null).filter(Boolean);
+  const tags=names.slice(0,2).map(n=>`<span class="tag">${n}</span>`).join('')+(names.length>2?`<span class="tag">+${names.length-2}</span>`:'');
+  const buffer=+document.getElementById('buffer').value||0; const max=+document.getElementById('maxQty').value||0;
+  const tr=document.createElement('tr');tr.dataset.search=(name+' '+channel+' '+names.join(' ')).toLowerCase();
+  tr.innerHTML=`<td><input type="checkbox"></td><td><strong>${name}</strong><div style="color:#8c8e97;font-size:10px;margin-top:3px">Created just now</div></td><td><div class="channel"><div class="logo-box">${channel[0]}</div>${channel}</div></td><td><div class="source-stack">${tags}</div></td><td>All products</td><td>Buffer ${buffer} · ${max?'Max '+max:'No max'}</td><td><span class="status"><span class="dot"></span>Active</span></td><td>Just now</td><td class="kebab">⋮</td>`;
+  document.getElementById('policyRows').prepend(tr);closeWizard();
+}
+function filterPolicies(){const q=document.getElementById('policySearch').value.toLowerCase();document.querySelectorAll('#policyRows tr').forEach(r=>r.style.display=(r.dataset.search||'').toLowerCase().includes(q)?'':'none')}
+renderStepper();showStep(1);recalc();updateStationTotal();
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+.react-datepicker__day--selected {
+  background: var(--primary-color) !important;
+}
+
+.react-datepicker__close-icon::after {
+  background-color: var(--primary-color) !important;
+} 

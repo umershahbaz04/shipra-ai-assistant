@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>4x6-label</title>
+    <!-- <link rel="stylesheet" href="./style.css"> -->
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, Helvetica, sans-serif;
+            max-width: 595px;
+            max-height: 842px;
+        }
+
+        .wrapper-container {
+            background: white;
+            width: 210mm; /* A4 width */
+            height: 276mm; /* A4 height */
+            box-sizing: border-box;
+            /* //display: block;*/
+            padding: 1.2cm;
+            margin: 1cm auto;
+        }
+
+        .d-flex {
+            display: flex;
+        }
+
+        .justify-between {
+            justify-content: space-between;
+        }
+
+        .justify-around {
+            justify-content: space-around;
+        }
+
+        .main {
+            flex: 1;
+            border: 1px solid #e9e9e9;
+            padding: 30px
+        }
+
+        .flex-column {
+            flex-direction: column;
+        }
+
+        .h-100 {
+            height: 100%;
+        }
+
+        .w-50 {
+            width: 50%;
+        }
+
+        .text-2 {
+            font-size: 20px !important;
+            font-weight: 600 !important;
+        }
+
+        .text-1 {
+            font-size: 25px;
+            font-weight: 600;
+            color: #bbbbbb;
+            letter-spacing: 1px;
+        }
+
+        .text-3 {
+            font-size: 20px;
+            font-weight: 500;
+        }
+
+        .heading-text {
+            padding: 20px 16px 7px;
+            border-bottom: 1px solid;
+            font-size: 22px;
+            font-weight: 500;
+        }
+
+        .w-100 {
+            width: 100%;
+        }
+
+        .w-20 {
+            width: 20%;
+        }
+
+        .mb-20 {
+            margin-bottom: 20px;
+        }
+
+        .mb-10 {
+            margin-bottom: 10px;
+        }
+
+        .mb-5 {
+            margin-bottom: 5px;
+        }
+
+        .content-text {
+            padding-bottom: 40px;
+            font-size: 14px;
+        }
+
+            .content-text span {
+                display: block;
+                font-size: 14px;
+                font-weight: 600;
+            }
+
+        .justify-content-end {
+            justify-content: end;
+        }
+
+        .content-text2 {
+            padding: 14px 12px;
+            font-size: 16px;
+        }
+
+        .text-right {
+            text-align: right;
+        }
+
+        .text-bold {
+            font-weight: 600;
+        }
+
+        table td {
+            border-bottom: thin solid;
+            padding: 10px 0px;
+            border-color: #dfdfdf;
+            font-size: 14px;
+        }
+
+        table th {
+            text-align: left;
+            font-size: 14px;
+            border-bottom: thin solid;
+            padding: 14px 0px;
+        }
+
+        @media print {
+
+            body,
+            .wrapper-container[size="A4"] {
+                margin: 0;
+                box-shadow: 0;
+            }
+        }
+
+        @page {
+            size: A4;
+            margin: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrapper-container d-flex" size="A4">
+        <div class="main">
+            <div class="page-header">
+                <div class="d-flex mb-20">
+                    <div class="w-50 text-2">
+                        Invoice
+                    </div>
+                    <div class="w-50 text-1 text-right">
+                        {{store}} 
+                    </div>
+                </div>
+                <div class="content-text">
+                    <div class=" d-flex mb-5">
+                        <div class="w-20">
+                            <b>Order Number</b>
+                        </div>
+                        <span style="
+                            margin-top: 0px;
+                            margin-left: 35px;
+                        ">
+                            {{orderNo}}
+                        </span>
+                    </div>
+                    <!--<div class=" d-flex">
+                        <div class="w-20">
+                            Due Date
+                        </div>
+                        <span style="
+                            margin-top: 0px;
+                            margin-left: 15px;
+                        ">
+                            {{orderDate}}
+                        </span>
+                    </div>-->
+                </div>
+
+                <div class="d-flex content-text">
+                    <div class="w-50 ">
+                        <div class="">
+                            <span class="mb-5">Store</span>
+                            <div>
+                                {{storeName}}
+                            </div>
+                        </div>
+                        <div class="">
+                            <span class="mb-5">Contact No</span>
+                            <div>
+                                {{customerServiceNo}}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="w-50 ">
+                        <div class="">
+                            <span class="mb-5">Bill to</span>
+                            <div class="mb-5">
+                                {{customerName}}
+                            </div>
+                            <div>
+                                {{customerAddress}}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!--<div class="d-flex content-text">
+                    <div class="">
+                        <div class="">
+                            <span class="text-2 mb-10">AED 25,000 due june 25, 2023</span>
+                            <div>
+                                <a href="" style="text-decoration: none;">Pay online</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>-->
+            </div>
+            <table cellpadding="0" cellspacing="0" width="100%" style="border: 1px;" rules="none" class="mb-20">
+                <tbody>
+                    {{orderitemHeader}}
+                    {{orderItems}}
+                </tbody>
+            </table>
+            <div class="d-flex justify-content-end">
+                <div class="w-50">
+                    <table cellpadding="0" cellspacing="0" width="100%" style="border: 1px;" rules="none">
+                        <tbody>
+
+                            <tr>
+                                <td>Subtotal</td>
+                                <td class="text-right">{{subTotal}}</td>
+                            </tr>
+                             
+                            <tr>
+                                <td>Sale Tax</td>
+                                <td class="text-right">{{totalTax}}</td>
+                            </tr>
+                            <tr>
+                                <td>Discount</td>
+                                <td class="text-right">{{discount}}</td>
+                            </tr>
+                            <tr>
+                                <td>Total</td>
+                                <td class="text-right">{{total}}</td>
+                            </tr>
+                            <!--<tr>
+                                <td>Amount Due</td>
+                                <td class="text-right">AED 25,200</td>
+                            </tr>-->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+    <script>
+        window.print();
+    </script>
+</body>
+
+</html>

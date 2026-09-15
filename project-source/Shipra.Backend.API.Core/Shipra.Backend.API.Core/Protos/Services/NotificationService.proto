@@ -1,0 +1,23 @@
+﻿using Autofac.Core;
+using Shipra.Backend.API.Core.Models;
+using System.IO.Packaging;
+
+syntax = "proto3";
+
+package notifications;
+
+service NotificationService
+{
+  rpc SendNotification (NotificationRequest) returns (NotificationResponse);
+}
+
+message NotificationRequest
+{
+    string message = 1;
+    string recipient = 2;
+}
+
+message NotificationResponse
+{
+    bool success = 1;
+}

@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>4x6-label</title>
+    <!-- <link rel="stylesheet" href="./style.css"> -->
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: sans-serif;
+        }
+
+        .wrapper-container {
+            background: white;
+            width: 21cm;
+            height: 29.7cm;
+            display: block;
+            padding: 1.2cm;
+            margin: 1cm auto;
+
+        }
+
+        .d-flex {
+            display: flex;
+        }
+
+        .justify-between {
+            justify-content: space-between;
+        }
+
+        .justify-around {
+            justify-content: space-around;
+        }
+
+        .main {
+            flex: 1;
+            border: 1px solid #e9e9e9;
+            padding:30px
+        }
+
+        .flex-column {
+            flex-direction: column;
+        }
+
+        .h-100 {
+            height: 100%;
+        }
+
+        .w-50 {
+            width: 50%;
+        }
+
+        .text-2 {
+            font-size: 20px !important;
+            font-weight: 600 !important;
+        }
+
+        .text-1 {
+            font-size: 25px;
+            font-weight: 600;
+            color: #bbbbbb;
+            letter-spacing: 1px;
+        }
+
+        .text-3 {
+            font-size: 20px;
+            font-weight: 500;
+        }
+
+        .heading-text {
+            padding: 20px 16px 7px;
+            border-bottom: 1px solid;
+            font-size: 22px;
+            font-weight: 500;
+        }
+
+        .w-100 {
+            width: 100%;
+        }
+
+       .w-20{
+        width: 20%;
+       }
+       .mb-20{
+        margin-bottom: 20px;
+       }
+       .mb-10{
+        margin-bottom: 10px;
+       }
+       .mb-5{
+        margin-bottom: 5px;
+       }
+        .content-text {
+            padding-bottom: 40px;
+            font-size: 14px;
+        }
+
+        .content-text span {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .justify-content-end{
+            justify-content :end;
+        }
+        .content-text2 {
+            padding: 14px 12px;
+            font-size: 16px;
+        }
+
+        .text-right {
+            text-align: right;
+        }
+
+        .text-bold {
+            font-weight: 600;
+        }
+        table td {
+            border-bottom: thin solid;
+            padding: 10px 0px;
+            border-color: #dfdfdf;
+            font-size: 14px;
+        }
+        table th{
+            text-align: left;
+    font-size: 14px;
+    border-bottom: thin solid;
+    padding: 14px 0px;
+        }
+        @media print {
+
+            body,
+            .wrapper-container[size="A4"] {
+                margin: 0;
+                box-shadow: 0;
+            }
+        }
+
+        @page {
+            size: A4;
+            margin: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrapper-container d-flex" size="A4">
+        <div class="main">
+            <div class="page-header">
+                <div class="d-flex mb-20">
+                    <div class="w-50 text-2">
+                        Invoice
+                    </div>
+                    <div class="w-50 text-1 text-right">
+                        Shipra
+                    </div>
+                </div>
+                <div class="content-text">
+                    <div class=" d-flex mb-5" >
+                        <div class="w-20">
+                            Invoice Number
+                        </div>
+                        <span style="
+                            margin-top: 0px;
+                            margin-left: 15px;
+                        ">
+                        12346ABC-555151Abc
+                        </span>
+                    </div>
+                    <div class=" d-flex" >
+                        <div class="w-20">
+                            Due Date
+                        </div>
+                        <span style="
+                            margin-top: 0px;
+                            margin-left: 15px;
+                        ">
+                        June 25, 2023
+                        </span>
+                    </div>
+                </div>
+             
+                <div class="d-flex content-text">
+                    <div class="w-50 ">
+                        <div class="" >
+                            <span class="mb-5">Shipra</span>
+                            <div>
+                                +90155151151212121
+                            </div>
+                        </div>
+                    </div>
+                    <div class="w-50 ">
+                        <div class="" >
+                            <span class="mb-5">Bill to</span>
+                            <div class="mb-5">
+                                Ali
+                            </div>
+                            <div>
+                                Ali@gmail.com
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="d-flex content-text">
+                    <div class="">
+                        <div class="" >
+                            <span class="text-2 mb-10">AED 25,000 due june 25, 2023</span>
+                            <div>
+                                <a href="" style="text-decoration: none;">Pay online</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <table cellpadding="0" cellspacing="0" width="100%" style="border: 1px;" rules="none" class="mb-20">
+                <tbody>
+                    <tr>
+                        <th>Description</th>
+                        <th>Qty</th>
+                        <th>Unit Price</th>
+                        <th>Amount</th>
+
+                    </tr>
+                    <tr>
+                        <td>Shipment</td>
+                        <td>500</td>
+                        <td>AED 50,00.00</td>
+                        <td>AED 25,000</td>
+
+                    </tr>
+                    <tr>
+                        <td>Integration</td>
+                        <td>1</td>
+                        <td>AED 200.00</td>
+                        <td>AED 200.00</td>
+
+                    </tr>
+                </tbody>
+            </table>
+            <div class="d-flex justify-content-end">
+                <div class="w-50">
+                    <table cellpadding="0" cellspacing="0" width="100%" style="border: 1px;" rules="none">
+                        <tbody>
+                           
+                            <tr>
+                                <td>Subtotal</td>
+                                <td class="text-right">AED 25,200</td>
+                            </tr>
+                           
+                            <tr>
+                                <td>VAT</td>
+                                <td class="text-right">5%</td>
+                            </tr>
+                            <tr>
+                                <td>Sale Tax</td>
+                                <td class="text-right">AED 10.00</td>
+                            </tr>
+                            <tr>
+                                <td>Discount</td>
+                                <td class="text-right">AED 10.00</td>
+                            </tr>
+                            <tr>
+                                <td>Total</td>
+                                <td class="text-right">AED 25,200</td>
+                            </tr>
+                            <tr>
+                                <td>Amount Due</td>
+                                <td class="text-right">AED 25,200</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+           
+        </div>
+    </div>
+        <script>
+            window.print();
+        </script>
+</body>
+
+</html>

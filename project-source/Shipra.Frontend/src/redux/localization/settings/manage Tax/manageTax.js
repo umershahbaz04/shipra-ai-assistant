@@ -1,0 +1,48 @@
+export const manageTaxEnglish = {
+  SETTING_MANAGE_TAX_TEXT: "Manage Tax",
+  SETTING_MANAGE_TAX_ADD_CLIENT_TAX: "Add Client Tax",
+  SETTING_MANAGE_TAX_UPDATE_TAX: "Update Tax",
+  SETTING_MANAGE_TAX_NAME: "Name",
+  SETTING_MANAGE_TAX_PERCENTAGE: "Percentage",
+  SETTING_MANAGE_TAX_STATUS: "Status",
+  SETTING_MANAGE_TAX_ACTION: "Action",
+  SETTING_MANAGE_TAX_ADD_TAX: "Add Tax",
+  SETTING_MANAGE_TAX_SELECT_TAX: "Select Tax",
+  SETTING_MANAGE_TAX_ADD_PERCENTAGE: "Add Percentage",
+};
+export const manageTaxArabic = {
+  SETTING_MANAGE_TAX_TEXT: "إدارة الضرائب",
+  SETTING_MANAGE_TAX_NAME: "الاسم",
+  SETTING_MANAGE_TAX_ADD_CLIENT_TAX: "إضافة ضريبة العميل",
+  SETTING_MANAGE_TAX_UPDATE_TAX: "تحديث الضريبة",
+  SETTING_MANAGE_TAX_PERCENTAGE: "النسبة المئوية",
+  SETTING_MANAGE_TAX_STATUS: "الحالة",
+  SETTING_MANAGE_TAX_ACTION: "الإجراء",
+  SETTING_MANAGE_TAX_ADD_TAX: "إضافة ضريبة",
+  SETTING_MANAGE_TAX_SELECT_TAX: "الضريبة المحددة",
+  SETTING_MANAGE_TAX_ADD_PERCENTAGE: "إضافة نسبة",
+};
+export const manageTaxChines = {
+  SETTING_MANAGE_TAX_TEXT: "管理税收",
+  SETTING_MANAGE_TAX_NAME: "名称",
+  SETTING_MANAGE_TAX_PERCENTAGE: "百分比",
+  SETTING_MANAGE_TAX_ADD_CLIENT_TAX: "添加客户税",
+  SETTING_MANAGE_TAX_UPDATE_TAX: "更新税",
+  SETTING_MANAGE_TAX_STATUS: "状态",
+  SETTING_MANAGE_TAX_ACTION: "操作",
+  SETTING_MANAGE_TAX_ADD_TAX: "添加税收",
+  SETTING_MANAGE_TAX_SELECT_TAX: "选择税",
+  SETTING_MANAGE_TAX_ADD_PERCENTAGE: "添加百分比",
+};
+export const manageTaxUrdu = {
+  SETTING_MANAGE_TAX_TEXT: "ٹیکس کو منظم کریں",
+  SETTING_MANAGE_TAX_ADD_CLIENT_TAX: "کلائنٹ کا ٹیکس شامل کریں",
+  SETTING_MANAGE_TAX_UPDATE_TAX: "ٹیکس اپ ڈیٹ کریں",
+  SETTING_MANAGE_TAX_NAME: "نام",
+  SETTING_MANAGE_TAX_PERCENTAGE: "فیصد",
+  SETTING_MANAGE_TAX_STATUS: "حیثیت",
+  SETTING_MANAGE_TAX_ACTION: "عمل",
+  SETTING_MANAGE_TAX_ADD_TAX: "ٹیکس شامل کریں",
+  SETTING_MANAGE_TAX_SELECT_TAX: "ٹیکس منتخب کریں",
+  SETTING_MANAGE_TAX_ADD_PERCENTAGE: "فیصد شامل کریں",
+};

@@ -1,0 +1,21 @@
+2026-09-07 16:07:54.721 +05:00 [INF] Application started. Press Ctrl+C to shut down.
+2026-09-07 16:07:54.849 +05:00 [INF] Hosting environment: Development
+2026-09-07 16:07:54.854 +05:00 [INF] Content root path: C:\shipra Backendapi\shipra Backendapi\Shipra.Backend.API\src\Shipra.Backend.API.Web
+2026-09-07 16:07:56.484 +05:00 [WRN] Failed to determine the https port for redirect.
+2026-09-07 16:07:57.166 +05:00 [INF] HTTP GET / responded 200 in 833.8624 ms
+2026-09-07 16:07:57.648 +05:00 [INF] HTTP GET /css/site.css responded 200 in 190.2899 ms
+2026-09-07 16:07:57.648 +05:00 [INF] HTTP GET /Shipra.Backend.API.Web.styles.css responded 200 in 190.3662 ms
+2026-09-07 16:07:57.657 +05:00 [INF] HTTP GET /js/site.js responded 200 in 199.4770 ms
+2026-09-07 16:07:57.661 +05:00 [INF] HTTP GET /lib/bootstrap/dist/css/bootstrap.min.css responded 200 in 203.7894 ms
+2026-09-07 16:07:57.799 +05:00 [INF] HTTP GET /lib/bootstrap/dist/js/bootstrap.bundle.min.js responded 200 in 342.1560 ms
+2026-09-07 16:07:57.817 +05:00 [INF] HTTP GET /lib/jquery/dist/jquery.min.js responded 200 in 360.0194 ms
+2026-09-07 16:08:02.114 +05:00 [INF] HTTP GET /swagger responded 301 in 5.7120 ms
+2026-09-07 16:08:02.294 +05:00 [INF] HTTP GET /swagger/index.html responded 200 in 166.0447 ms
+2026-09-07 16:08:02.338 +05:00 [INF] HTTP GET /swagger/index.css responded 200 in 7.7241 ms
+2026-09-07 16:08:02.342 +05:00 [INF] HTTP GET /swagger/index.js responded 200 in 8.1042 ms
+2026-09-07 16:08:02.347 +05:00 [INF] HTTP GET /swagger/swagger-ui.css responded 200 in 17.7745 ms
+2026-09-07 16:08:02.349 +05:00 [INF] HTTP GET /swagger/swagger-ui-standalone-preset.js responded 200 in 16.6523 ms
+2026-09-07 16:08:02.398 +05:00 [INF] HTTP GET /swagger/swagger-ui-bundle.js responded 200 in 67.3862 ms
+2026-09-07 16:08:02.827 +05:00 [INF] HTTP GET /swagger/favicon-32x32.png responded 200 in 1.7350 ms
+2026-09-07 16:08:03.332 +05:00 [INF] HTTP GET /swagger/v1/swagger.json responded 200 in 557.7669 ms
+2026-09-07 16:14:47.702 +05:00 [INF] HTTP GET /api/Account/GetCodSettlementReportPdf responded 401 in 152.9241 ms

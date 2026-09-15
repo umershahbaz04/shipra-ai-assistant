@@ -1,0 +1,207 @@
+import {
+  BillingHistoryArabic,
+  BillingHistoryChinese,
+  BillingHistoryEnglish,
+  BillingHistoryUrdu,
+} from "./billingHistory/billingHistory";
+import {
+  DocumentSettingsChinese,
+  DocumentSettingsEnglish,
+  DocumentSettingsUrdu,
+} from "./documentSettings/documentSetting";
+import {
+  DriverStatusesArabic,
+  DriverStatusesChines,
+  DriverStatusesEnglish,
+  DriverStatusesUrdu,
+} from "./driverStatuses/driverStatuses";
+import {
+  manageTaxArabic,
+  manageTaxChines,
+  manageTaxEnglish,
+  manageTaxUrdu,
+} from "./manage Tax/manageTax";
+import {
+  metaFieldArabic,
+  metaFieldChines,
+  metaFieldEnglish,
+  metaFieldUrdu,
+} from "./metaFields/metaField";
+import {
+  notificationArabic,
+  notificationChines,
+  notificationEnglish,
+  notificationUrdu,
+} from "./notification/notification";
+import {
+  orderBoxArabic,
+  orderBoxChinese,
+  orderBoxEnglish,
+  orderBoxUrdu,
+} from "./orderBox/orderBox";
+import {
+  payoutBankArabic,
+  payoutBankChinese,
+  payoutBankEnglish,
+  payoutBankUrdu,
+} from "./payoutBank";
+import {
+  permissionArabic,
+  permissionChines,
+  permissionEnglish,
+  permissionUrdu,
+} from "./permissions/permission";
+import {
+  profileArabic,
+  profileChines,
+  profileEnglish,
+  profileUrdu,
+} from "./profile/profile";
+import {
+  returnReasonArabic,
+  returnReasonChines,
+  returnReasonEnglish,
+  returnReasonUrdu,
+} from "./returnReason";
+import {
+  SecurityArabic,
+  SecurityChines,
+  SecurityEnglish,
+  SecurityUrdu,
+} from "./security/security";
+import {
+  shipmentTabArabic,
+  shipmentTabChines,
+  shipmentTabEnglish,
+  shipmentTabUrdu,
+} from "./shipmentTab/shipmentTab";
+import {
+  userRolesArabic,
+  userRolesChines,
+  userRolesEnglish,
+  userRolesUrdu,
+} from "./userRoles/userRoles";
+import { UserArabic, UserChines, UserEnglish, UserUrdu } from "./users/user";
+import {
+  webhookEventArabic,
+  webhookEventChines,
+  webhookEventEnglish,
+  webhookEventUrdu,
+} from "./webhookEvents/webhook";
+
+export const settingEnglish = {
+  ...DriverStatusesEnglish,
+  ...metaFieldEnglish,
+  ...permissionEnglish,
+  ...shipmentTabEnglish,
+  ...userRolesEnglish,
+  ...profileEnglish,
+  ...SecurityEnglish,
+  ...UserEnglish,
+  ...manageTaxEnglish,
+  ...returnReasonEnglish,
+  ...notificationEnglish,
+  ...DocumentSettingsEnglish,
+  ...BillingHistoryEnglish,
+  ...webhookEventEnglish,
+  ...payoutBankEnglish,
+  ...orderBoxEnglish,
+  SETTINGS: "Settings",
+  APP_SETTING: "App Setting",
+  NOTIFICATION: "Notification",
+  BILLING: "Billing",
+  BILLING_HISTORY: "Billing History",
+  DOCUMENT_SETTINGS: "Document Settings",
+  ACTION: "Action",
+  START_DATE: "Start Date",
+  END_DATE: "End Date",
+  FILTER: "Filter",
+  CLEAR_FILTER: "Clear FIlter",
+};
+export const settingArabic = {
+  ...DriverStatusesArabic,
+  ...metaFieldArabic,
+  ...permissionArabic,
+  ...shipmentTabArabic,
+  ...userRolesArabic,
+  ...profileArabic,
+  ...SecurityArabic,
+  ...UserArabic,
+  ...manageTaxArabic,
+  ...returnReasonArabic,
+  ...notificationArabic,
+  ...DriverStatusesArabic,
+  ...BillingHistoryArabic,
+  ...webhookEventArabic,
+  ...payoutBankArabic,
+  ...orderBoxArabic,
+  SETTINGS: "إعدادات",
+  APP_SETTING: "إعدادات التطبيق",
+  NOTIFICATION: "إشعار",
+  BILLING: "الفواتير",
+  BILLING_HISTORY: "تاريخ الفواتير",
+  DOCUMENT_SETTINGS: "إعدادات المستند",
+  ACTION: "إجراء",
+  FILTER: "تصفية",
+  CLEAR_FILTER: "مسح التصفية",
+  START_DATE: "تاريخ البدء",
+  END_DATE: "تاريخ الانتهاء",
+};
+export const settingChinese = {
+  ...DriverStatusesChines,
+  ...metaFieldChines,
+  ...permissionChines,
+  ...shipmentTabChines,
+  ...userRolesChines,
+  ...profileChines,
+  ...SecurityChines,
+  ...UserChines,
+  ...manageTaxChines,
+  ...returnReasonChines,
+  ...notificationChines,
+  ...DocumentSettingsChinese,
+  ...BillingHistoryChinese,
+  ...webhookEventChines,
+  ...payoutBankChinese,
+  ...orderBoxChinese,
+  SETTINGS: "设置",
+  APP_SETTING: "应用程序设置",
+  NOTIFICATION: "通知",
+  BILLING: "计费",
+  BILLING_HISTORY: "账单历史",
+  DOCUMENT_SETTINGS: "文档设置",
+  ACTION: "操作",
+  FILTER: "过滤",
+  CLEAR_FILTER: "清除过滤",
+  START_DATE: "开始日期",
+  END_DATE: "结束日期",
+};
+export const settingUrdu = {
+  ...DriverStatusesUrdu,
+  ...metaFieldUrdu,
+  ...permissionUrdu,
+  ...shipmentTabUrdu,
+  ...userRolesUrdu,
+  ...profileUrdu,
+  ...SecurityUrdu,
+  ...UserUrdu,
+  ...manageTaxUrdu,
+  ...returnReasonUrdu,
+  ...notificationUrdu,
+  ...DocumentSettingsUrdu,
+  ...BillingHistoryUrdu,
+  ...webhookEventUrdu,
+  ...payoutBankUrdu,
+  ...orderBoxUrdu,
+  SETTINGS: "سیٹنگز",
+  APP_SETTING: "ایپ سیٹنگ",
+  NOTIFICATION: "نوٹیفکیشن",
+  BILLING: "بلنگ",
+  BILLING_HISTORY: "بلنگ کی تاریخ",
+  DOCUMENT_SETTINGS: "دستاویز کی سیٹنگز",
+  ACTION: "عمل",
+  START_DATE: "آغاز کی تاریخ",
+  END_DATE: "اختتام کی تاریخ",
+  FILTER: "فلٹر",
+  CLEAR_FILTER: "فلٹر صاف کریں",
+};

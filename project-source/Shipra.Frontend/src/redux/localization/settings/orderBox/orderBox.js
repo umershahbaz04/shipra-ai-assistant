@@ -1,0 +1,83 @@
+export const orderBoxEnglish = {
+  SETTING_ORDER_BOX: "Order Box",
+  SETTING_ORDER_BOX_CREATE_ORDER_BOX: "Create Order Box",
+  SETTING_ORDER_BOX_ORDER_BOX_TYPE: "Order Box Type",
+  SETTING_ORDER_BOX_UPDATE_ORDER_BOX: "Update Order Box",
+  SETTING_ORDER_BOX_UPDATE_BOX: "Update Box",
+  SETTING_ORDER_BOX_CREATE_BOX: "Create Box",
+  SETTING_ORDER_BOX_BOX_NAME: "Box Name",
+  SETTING_ORDER_BOX_LENGTH: "Length",
+  SETTING_ORDER_BOX_WIDTH: "width",
+  SETTING_ORDER_BOX_HEIGHT: "Height",
+  SETTING_ORDER_BOX_VOLUME: "Volume",
+  SETTING_ORDER_BOX_STATUS: "Status",
+  SETTING_ORDER_BOX_ACTION: "Action",
+  SETTING_ORDER_BOX_MARK_AS_DEFAULT: "Mark as default",
+  SETTING_ORDER_BOX_ARE_YOU_SURE_TO_DISABLE_THIS_ITEM:
+    "Are you sure to disable this item?",
+  SETTING_ORDER_BOX_AFTER_THIS_ACTION_THE_ITEM_WILL_BE_DISABLED_IMMEDIATELY_BUT_YOU_CAN_UNDO_THIS_ACTION_ANYTIME:
+    "After this action the item will be disabled immediately but you can undo this action anytime.",
+  SETTING_ORDER_BOX_DISABLE: "Disable",
+};
+export const orderBoxArabic = {
+  SETTING_ORDER_BOX: "صندوق الطلب",
+  SETTING_ORDER_BOX_CREATE_ORDER_BOX: "إنشاء صندوق الطلب",
+  SETTING_ORDER_BOX_ORDER_BOX_TYPE: "نوع صندوق الطلب",
+  SETTING_ORDER_BOX_CREATE_BOX: "إنشاء صندوق",
+  SETTING_ORDER_BOX_BOX_NAME: "اسم الصندوق",
+  SETTING_ORDER_BOX_UPDATE_ORDER_BOX: "تحديث صندوق الطلب",
+  SETTING_ORDER_BOX_UPDATE_BOX: "تحديث الصندوق",
+  SETTING_ORDER_BOX_LENGTH: "الطول",
+  SETTING_ORDER_BOX_WIDTH: "العرض",
+  SETTING_ORDER_BOX_HEIGHT: "الارتفاع",
+  SETTING_ORDER_BOX_VOLUME: "الحجم",
+  SETTING_ORDER_BOX_STATUS: "الحالة",
+  SETTING_ORDER_BOX_ACTION: "إجراء",
+  SETTING_ORDER_BOX_MARK_AS_DEFAULT: "اجعلها افتراضية",
+  SETTING_ORDER_BOX_ARE_YOU_SURE_TO_DISABLE_THIS_ITEM:
+    "هل أنت متأكد أنك تريد تعطيل هذا العنصر؟",
+  SETTING_ORDER_BOX_AFTER_THIS_ACTION_THE_ITEM_WILL_BE_DISABLED_IMMEDIATELY_BUT_YOU_CAN_UNDO_THIS_ACTION_ANYTIME:
+    "بعد هذه العملية، سيتم تعطيل العنصر على الفور، ولكن يمكنك التراجع عن هذه العملية في أي وقت.",
+  SETTING_ORDER_BOX_DISABLE: "تعطيل",
+};
+export const orderBoxChinese = {
+  SETTING_ORDER_BOX: "订单框",
+  SETTING_ORDER_BOX_CREATE_ORDER_BOX: "创建订单箱",
+  SETTING_ORDER_BOX_ORDER_BOX_TYPE: "订单箱类型",
+  SETTING_ORDER_BOX_CREATE_BOX: "创建箱子",
+  SETTING_ORDER_BOX_UPDATE_ORDER_BOX: "更新订单箱",
+  SETTING_ORDER_BOX_UPDATE_BOX: "更新箱子",
+  SETTING_ORDER_BOX_BOX_NAME: "箱子名称",
+  SETTING_ORDER_BOX_LENGTH: "长度",
+  SETTING_ORDER_BOX_WIDTH: "宽度",
+  SETTING_ORDER_BOX_HEIGHT: "高度",
+  SETTING_ORDER_BOX_VOLUME: "体积",
+  SETTING_ORDER_BOX_STATUS: "状态",
+  SETTING_ORDER_BOX_ACTION: "操作",
+  SETTING_ORDER_BOX_MARK_AS_DEFAULT: "标记为默认",
+  SETTING_ORDER_BOX_ARE_YOU_SURE_TO_DISABLE_THIS_ITEM: "您确定要禁用此项吗？",
+  SETTING_ORDER_BOX_AFTER_THIS_ACTION_THE_ITEM_WILL_BE_DISABLED_IMMEDIATELY_BUT_YOU_CAN_UNDO_THIS_ACTION_ANYTIME:
+    "在此操作后，项将立即禁用，但您可以随时撤销此操作。",
+  SETTING_ORDER_BOX_DISABLE: "禁用",
+};
+export const orderBoxUrdu = {
+  SETTING_ORDER_BOX: "آرڈر باکس",
+  SETTING_ORDER_BOX_CREATE_ORDER_BOX: "آرڈر باکس بنائیں",
+  SETTING_ORDER_BOX_ORDER_BOX_TYPE: "آرڈر باکس کی قسم",
+  SETTING_ORDER_BOX_UPDATE_ORDER_BOX: "آرڈر باکس اپ ڈیٹ کریں",
+  SETTING_ORDER_BOX_UPDATE_BOX: "باکس اپ ڈیٹ کریں",
+  SETTING_ORDER_BOX_CREATE_BOX: "باکس بنائیں",
+  SETTING_ORDER_BOX_BOX_NAME: "باکس کا نام",
+  SETTING_ORDER_BOX_LENGTH: "لمبائی",
+  SETTING_ORDER_BOX_WIDTH: "چوڑائی",
+  SETTING_ORDER_BOX_HEIGHT: "اونچائی",
+  SETTING_ORDER_BOX_VOLUME: "حجم",
+  SETTING_ORDER_BOX_STATUS: "حالات",
+  SETTING_ORDER_BOX_ACTION: "عمل",
+  SETTING_ORDER_BOX_MARK_AS_DEFAULT: "ڈیفالٹ کے طور پر نشان زد کریں",
+  SETTING_ORDER_BOX_ARE_YOU_SURE_TO_DISABLE_THIS_ITEM:
+    "کیا آپ اس آئٹم کو غیر فعال کرنے کے لیے پُر اعتماد ہیں؟",
+  SETTING_ORDER_BOX_AFTER_THIS_ACTION_THE_ITEM_WILL_BE_DISABLED_IMMEDIATELY_BUT_YOU_CAN_UNDO_THIS_ACTION_ANYTIME:
+    "اس عمل کے بعد آئٹم فوراً غیر فعال ہو جائے گا لیکن آپ کبھی بھی اس عمل کو واپس لے سکتے ہیں۔",
+  SETTING_ORDER_BOX_DISABLE: "غیر فعال کریں",
+};

@@ -1,0 +1,48 @@
+export const returnEnglish = {
+  MY_CARRIER_RETURN: "Returns",
+  MY_CARRIER_RETURN_S: "Return(s)",
+  MY_CARRIER_RETURN_START_DATE: "Start Date",
+  MY_CARRIER_RETURN_END_DATE: "End Date",
+  MY_CARRIER_RETURN_ORDERS: "Orders",
+  MY_CARRIER_RETURN_RETURN_REPORT_NO: "Return Report No.",
+  MY_CARRIER_RETURN_TOTAL_ORDERS: "Total Orders",
+  MY_CARRIER_RETURN_CARRIER_NAME: "Carrier Name",
+  MY_CARRIER_RETURN_CREATE_DATE: "Created Date",
+  MY_CARRIER_RETURN_ACTION: "Action",
+};
+export const returnArabic = {
+  MY_CARRIER_RETURN: "يعود",
+  MY_CARRIER_RETURN_S: "يعود",
+  MY_CARRIER_RETURN_START_DATE: "تاريخ البدء",
+  MY_CARRIER_RETURN_END_DATE: "تاريخ الانتهاء",
+  MY_CARRIER_RETURN_RETURN_REPORT_NO: "رقم تقرير الإرجاع",
+  MY_CARRIER_RETURN_TOTAL_ORDERS: "إجمالي الطلبات",
+  MY_CARRIER_RETURN_CARRIER_NAME: "اسم الناقل",
+  MY_CARRIER_RETURN_ORDERS: "الطلبات",
+  MY_CARRIER_RETURN_CREATE_DATE: "تاريخ الإنشاء",
+  MY_CARRIER_RETURN_ACTION: "الإجراء",
+};
+export const returnChinese = {
+  MY_CARRIER_RETURN: "返回",
+  MY_CARRIER_RETURN_S: "返回",
+  MY_CARRIER_RETURN_START_DATE: "开始日期",
+  MY_CARRIER_RETURN_END_DATE: "结束日期",
+  MY_CARRIER_RETURN_RETURN_REPORT_NO: "退货报告编号",
+  MY_CARRIER_RETURN_TOTAL_ORDERS: "总订单数",
+  MY_CARRIER_RETURN_ORDERS: "订单",
+  MY_CARRIER_RETURN_CARRIER_NAME: "承运人名称",
+  MY_CARRIER_RETURN_CREATE_DATE: "创建日期",
+  MY_CARRIER_RETURN_ACTION: "操作",
+};
+export const returnUrdu = {
+  MY_CARRIER_RETURN: "واپسی",
+  MY_CARRIER_RETURN_S: "واپسی(یاں)",
+  MY_CARRIER_RETURN_START_DATE: "شروع کرنے کی تاریخ",
+  MY_CARRIER_RETURN_END_DATE: "اختتامی تاریخ",
+  MY_CARRIER_RETURN_ORDERS: "آرڈرز",
+  MY_CARRIER_RETURN_RETURN_REPORT_NO: "واپسی کی رپورٹ نمبر",
+  MY_CARRIER_RETURN_TOTAL_ORDERS: "کل آرڈرز",
+  MY_CARRIER_RETURN_CARRIER_NAME: "کیریئر کا نام",
+  MY_CARRIER_RETURN_CREATE_DATE: "بنانے کی تاریخ",
+  MY_CARRIER_RETURN_ACTION: "عمل",
+};
