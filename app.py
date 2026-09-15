@@ -1262,6 +1262,10 @@ with st.sidebar.expander("MCP Debug"):
                 st.success(
                     f"MCP can see {total_files} searchable source files."
                 )
+
+
+        except Exception as health_error:
+            import traceback
 def parse_json_object(text):
     """Parse the first JSON object from a model response without requiring a pristine reply."""
     cleaned = (text or "").strip()
@@ -1291,9 +1295,6 @@ def parse_json_object(text):
             return value
 
     return None
-
-        except Exception as health_error:
-            import traceback
 
             st.error(
                 "Source health check failed: "
