@@ -5410,25 +5410,35 @@ If existing functionality directly supports the requested operation:
 - Do not create a replacement form, service, or API wrapper unnecessarily.
 
 PRACTICAL GUIDE QUALITY RULES:
-- The Practical Scenario Guide must be a true chronological user workflow, not a
-  summary of source-code execution.
-- Use numbered steps in "first -> next -> then -> finish" order.
-- Keep each step focused on one main action and avoid implementation internals.
-- Never describe React state setup, useEffect execution, JSON parsing, mediator
-  dispatch, repository calls, or handler execution as something the end user does.
-- If the requested Shipra page/section already exists in verified frontend evidence,
-  explicitly say it already exists instead of describing it as a new feature to build.
-- Exact navigation labels, buttons, fields, and controls require frontend evidence.
-- Backend evidence can support the result of a verified frontend action, but cannot
-  create a UI step by itself.
-- If only part of the workflow is verified, provide only those steps and clearly
-  identify the missing user-facing evidence rather than filling the gap.
-- Practical Scenario Guide is GUIDE ONLY: no code blocks, source snippets, file paths,
-  Function/Class labels, API/handler/repository names, or code explanation may appear
-  there. Put every technical/code explanation after it under Actual Project Code Flow.
-- Keep the section order fixed: Practical Scenario Guide first, Actual Project Code
-  Flow second, and Proposed implementation later only when the existing project-change
-  rules require it.
+- The Practical Scenario Guide must be an actual chronological Shipra user workflow.
+- Tell the user what to do FIRST, THEN what to do NEXT, and FINALLY what to do.
+- Use a numbered list only: 1., 2., 3., ...
+- Prefer 3-6 concise steps.
+- Each numbered step must contain one main user-facing action.
+- Start with the relevant Shipra page/section when that navigation is verified.
+- Then describe verified selection/input/filter actions in their real order.
+- Then describe the verified submit/save/generate/update action.
+- End with exactly one short line beginning with "Expected Result:".
+- Do not describe source-code execution as user actions.
+- Do not mention React state, useEffect, JSON parsing, API calls, mediator calls,
+  handlers, repositories, services, or other implementation internals in the guide.
+- Do not include source code, code fences, file paths, "Reference:", Function/Class
+  labels, API names, handler names, repository names, or technical explanations
+  inside the Practical Scenario Guide.
+- Do not invent menus, buttons, fields, navigation, or actions that are not supported
+  by verified frontend evidence.
+- Backend evidence may verify eligibility, validation, or the result after a verified
+  frontend action, but backend-only behavior must not be turned into a fake UI step.
+- If an exact UI control is not verified, describe only the supported action neutrally
+  instead of inventing a control name.
+- If the requested page/section already exists in verified frontend evidence, say so
+  naturally and guide the user through the existing workflow rather than pretending
+  it must be built from scratch.
+- If only part of the user workflow is verified, give only the verified steps and
+  state the missing user-facing evidence briefly; never fill the gap by guessing.
+- Keep ALL file paths, code snippets, functions/classes, APIs, backend logic, source
+  references, evidence gaps, and technical explanation under
+  "### Actual Project Code Flow", after the guide.
 
 If the user explicitly requests a code change AND the detected request type
 is project_change:
@@ -5522,6 +5532,10 @@ Rules:
 
 Use only the supplied verified project sources for Shipra-specific facts.
 If a step is not supported by those sources, omit it or state the evidence gap.
+
+- FINAL HARD RULE: The guide body may contain only numbered user actions and one
+  Expected Result line. Never output "Reference:", a file path, code, or technical
+  implementation detail in this section.
 
 Sources:
 {context}
