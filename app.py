@@ -4586,30 +4586,63 @@ def build_verified_evidence_gap_answer(question):
 
 
 
+def _normalize_order_status(value):
+    """Normalize order-status text without merging different business concepts."""
+    text = str(value or "").strip().casefold().replace("_", " ").replace("-", " ")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _order_status_from_record(record):
+    """Read status across the mock schemas used by Shipra test data."""
+    for name in (
+        "orderStatus", "status", "Status", "OrderStatus", "order_status",
+        "orderStatusName", "OrderStatusName", "trackingStatus",
+        "trackingStatusName", "carrierTrackingStatus", "carrierTrackingStatusName",
+    ):
+        value = record.get(name)
+        if value in (None, ""):
+            continue
+        if isinstance(value, dict):
+            for key in ("name", "text", "value", "statusName", "label"):
+                nested = value.get(key)
+                if nested not in (None, ""):
+                    return str(nested)
+            continue
+        return str(value)
+    return ""
+
+
 def detect_order_count_status(question):
-    """Return a supported order status for direct count questions, else None."""
-    text = str(question or "").strip().lower()
+    """Return the requested order status for direct count questions."""
+    text = _normalize_order_status(question)
     if not re.search(r"\b(order|orders)\b", text):
         return None
-
-    count_intent = (
-        re.search(r"\bhow\s+many\b", text)
-        or re.search(r"\bcount\b", text)
-        or re.search(r"\bnumber\s+of\b", text)
-        or re.search(r"\btotal\b", text)
-    )
-    if not count_intent:
+    if not any(re.search(pattern, text) for pattern in (
+        r"\bhow\s+many\b", r"\bcount\b", r"\bnumber\s+of\b", r"\btotal\b",
+        r"\bkitn[ae]\b",
+    )):
         return None
 
-    # Keep business concepts separate: COD pending is not order-status Pending.
-    if re.search(r"\bcod\s+pending", text):
+    # COD pending is a receivables/payment concept, not the Pending order status.
+    if re.search(r"\bcod\s+pending\b", text):
         return None
 
     aliases = (
-        ("on_the_way", ("on the way", "ontheway")),
+        ("on the way", ("on the way", "ontheway", "in transit", "intransit")),
+        ("ready for assignment", ("ready for assignment", "readyforassignment")),
+        ("out for delivery", ("out for delivery", "outfordelivery")),
+        ("not delivered", ("not delivered", "undelivered")),
         ("delivered", ("delivered",)),
         ("pending", ("pending",)),
         ("queued", ("queued", "queue")),
+        ("cancelled", ("cancelled", "canceled")),
+        ("returned", ("returned", "return")),
+        ("failed", ("failed", "failure")),
+        ("assigned", ("assigned",)),
+        ("unassigned", ("unassigned", "not assigned")),
+        ("confirmed", ("confirmed",)),
+        ("processing", ("processing", "in process")),
+        ("shipped", ("shipped",)),
     )
     for canonical, terms in aliases:
         if any(term in text for term in terms):
@@ -4617,75 +4650,123 @@ def detect_order_count_status(question):
     return None
 
 
+def _candidate_orders_files():
+    app_root = Path(__file__).resolve().parent
+    candidates = [
+        app_root / "project-source" / "mock-data" / "orders.json",
+        app_root / "mock-data" / "orders.json",
+    ]
+    project_root_env = str(os.getenv("SHIPRA_PROJECT_ROOT", "")).strip()
+    if project_root_env:
+        candidates.insert(0, Path(project_root_env) / "mock-data" / "orders.json")
+    return candidates
+
+
+def _load_local_verified_orders():
+    """Fallback to the deployed orders.json itself; never invent records."""
+    for path in _candidate_orders_files():
+        try:
+            if not path.is_file():
+                continue
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+            if isinstance(data, dict):
+                data = data.get("orders") if isinstance(data.get("orders"), list) else [data]
+            if isinstance(data, list):
+                return [x for x in data if isinstance(x, dict)], str(path.resolve())
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+    return None, None
+
+
+def _filter_orders_for_status(orders, wanted_status):
+    wanted = _normalize_order_status(wanted_status)
+    output = []
+    for order in orders or []:
+        if not isinstance(order, dict):
+            continue
+        current = _normalize_order_status(_order_status_from_record(order))
+        if current == wanted:
+            output.append(order)
+    return output
+
+
 async def get_verified_order_status_count(status_key):
-    """Return exact matching mock orders for a status via MCP structured data."""
-    status_labels = {
-        "delivered": "Delivered",
-        "pending": "Pending",
-        "queued": "Queued",
-        "on_the_way": "On The Way",
-    }
-    wanted_status = status_labels.get(status_key)
+    """MCP-first status lookup, validated against returned records, with file fallback."""
+    wanted_status = str(status_key or "").strip()
     if not wanted_status:
         return None
 
-    params = get_mcp_server_params()
-    async with asyncio.timeout(30):
-        async with Client(params) as mcp_client:
-            # search_mock_orders reads project-source/mock-data/orders.json and
-            # returns the matching records themselves, so the count and the
-            # customer/order details come from the same verified dataset.
-            result = await mcp_client.call_tool(
-                "search_mock_orders",
-                {
-                    "labels": None,
-                    "payment_method": None,
-                    "status": wanted_status,
-                    "exclude_status": None,
-                    "carrier": None,
-                },
-            )
+    # Ask MCP for ALL mock orders, then filter deterministically here. This avoids
+    # server-side schema/alias mismatches such as status vs orderStatusName.
+    mcp_orders = None
+    mcp_file_path = None
+    try:
+        params = get_mcp_server_params()
+        async with asyncio.timeout(30):
+            async with Client(params) as mcp_client:
+                result = await mcp_client.call_tool(
+                    "search_mock_orders",
+                    {
+                        "labels": None,
+                        "payment_method": None,
+                        "status": None,
+                        "exclude_status": None,
+                        "carrier": None,
+                    },
+                )
+        if not getattr(result, "is_error", False):
+            payload = _extract_mcp_payload(result)
+            for _ in range(5):
+                if not isinstance(payload, dict):
+                    break
+                if payload.get("status") == "ok" or "orders" in payload or "matches" in payload:
+                    break
+                child = next((payload.get(k) for k in ("result", "data", "content", "value") if isinstance(payload.get(k), dict)), None)
+                if child is None:
+                    break
+                payload = child
+            if isinstance(payload, dict) and payload.get("status") == "ok":
+                candidate = payload.get("orders")
+                if candidate is None:
+                    candidate = payload.get("matches")
+                if isinstance(candidate, dict):
+                    candidate = [candidate]
+                if isinstance(candidate, list):
+                    mcp_orders = [x for x in candidate if isinstance(x, dict)]
+                    mcp_file_path = payload.get("resolved_path") or payload.get("file_path")
+    except Exception:
+        mcp_orders = None
 
-    if getattr(result, "is_error", False):
-        return None
+    # If MCP supplied records, they are the primary source. Filter locally using
+    # all supported status field aliases so Pending/Delivered/etc. cannot be lost.
+    if mcp_orders:
+        matches = _filter_orders_for_status(mcp_orders, wanted_status)
+        return {
+            "count": len(matches),
+            "status_key": _normalize_order_status(wanted_status).replace(" ", "_"),
+            "status_label": wanted_status,
+            "orders": matches,
+            "data_source": "mcp_mock",
+            "file_path": mcp_file_path or "mock-data/orders.json",
+            "total_records_checked": len(mcp_orders),
+        }
 
-    payload = _extract_mcp_payload(result)
+    # A zero/empty MCP dataset is not accepted as proof of zero. Read the exact
+    # deployed orders.json as a deterministic fallback and calculate again.
+    local_orders, local_path = _load_local_verified_orders()
+    if local_orders is not None:
+        matches = _filter_orders_for_status(local_orders, wanted_status)
+        return {
+            "count": len(matches),
+            "status_key": _normalize_order_status(wanted_status).replace(" ", "_"),
+            "status_label": wanted_status,
+            "orders": matches,
+            "data_source": "local_verified_mock_fallback",
+            "file_path": local_path or "mock-data/orders.json",
+            "total_records_checked": len(local_orders),
+        }
 
-    # Some MCP SDK/server combinations wrap a tool's dictionary under one
-    # extra result/data/content key. Unwrap only deterministic dict wrappers.
-    for _ in range(4):
-        if not isinstance(payload, dict):
-            break
-        if payload.get("status") == "ok" or "orders" in payload:
-            break
-        unwrapped = None
-        for key in ("result", "data", "content", "value"):
-            candidate = payload.get(key)
-            if isinstance(candidate, dict):
-                unwrapped = candidate
-                break
-        if unwrapped is None:
-            break
-        payload = unwrapped
-
-    if not isinstance(payload, dict) or payload.get("status") != "ok":
-        return None
-
-    orders = payload.get("orders") or payload.get("matches") or []
-    if isinstance(orders, dict):
-        orders = [orders]
-    if not isinstance(orders, list):
-        return None
-    orders = [item for item in orders if isinstance(item, dict)]
-
-    return {
-        "count": len(orders),
-        "status_key": status_key,
-        "orders": orders,
-        "data_source": "mock",
-        "file_path": payload.get("file_path", "mock-data/orders.json"),
-    }
-
+    return None
 
 def _first_order_value(record, *names):
     """Pick the first non-empty value across common mock-order field aliases."""
@@ -4709,7 +4790,7 @@ def _format_order_person_details(record):
     customer = _first_order_value(
         record, "customerName", "customer_name", "CustomerName", "receiverName", "name"
     )
-    status = _first_order_value(record, "orderStatus", "status", "Status")
+    status = _first_order_value(record, "orderStatus", "status", "Status", "OrderStatus", "order_status", "orderStatusName", "OrderStatusName", "trackingStatus", "trackingStatusName", "carrierTrackingStatus", "carrierTrackingStatusName")
     phone = _first_order_value(
         record, "customerPhone", "phone", "phoneNumber", "mobile", "contactNo", "CustomerPhone"
     )
@@ -4752,20 +4833,14 @@ def _format_order_person_details(record):
 
 def build_order_count_answer(status_result, response_language):
     """Return exact status count plus the matching customers/orders from MCP data."""
-    labels = {
-        "delivered": "delivered",
-        "pending": "pending",
-        "queued": "queued",
-        "on_the_way": "on the way",
-    }
     key = status_result["status_key"]
-    label = labels.get(key, key.replace("_", " "))
+    label = str(status_result.get("status_label") or key.replace("_", " ")).lower()
     orders = status_result.get("orders") or []
     count = len(orders)
     detail_lines = [_format_order_person_details(record) for record in orders]
 
     if response_language == "Roman Urdu":
-        heading = f"**{count} orders {label} hain.**"
+        heading = f"**{count} order{'s' if count != 1 else ''} {label} hain.**"
         if detail_lines:
             details = "\n\n".join(f"- {line}" for line in detail_lines)
             return (
@@ -4777,7 +4852,7 @@ def build_order_count_answer(status_result, response_language):
             f"{heading}\n\nVerified MCP mock data mein is status ka koi matching order record nahi mila."
         )
 
-    heading = f"**{count} orders are {label}.**"
+    heading = f"**{count} order{'s' if count != 1 else ''} {'are' if count != 1 else 'is'} {label}.**"
     if detail_lines:
         details = "\n\n".join(f"- {line}" for line in detail_lines)
         return (
