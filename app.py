@@ -1264,10 +1264,39 @@ with st.sidebar.expander("MCP Debug"):
                 )
 
         except Exception as health_error:
+            import traceback
+
             st.error(
                 "Source health check failed: "
                 f"{type(health_error).__name__}: "
                 f"{health_error}"
+            )
+
+            # Show the real nested error from ExceptionGroup
+            if isinstance(health_error, BaseExceptionGroup):
+                for i, sub_error in enumerate(
+                    health_error.exceptions,
+                    start=1,
+                ):
+                    st.error(
+                        f"Sub-exception {i}: "
+                        f"{type(sub_error).__name__}: "
+                        f"{sub_error}"
+                    )
+
+            # Print the complete traceback in Streamlit Cloud logs
+            print(
+                "\n========== SOURCE HEALTH CHECK ERROR =========="
+            )
+
+            traceback.print_exception(
+                type(health_error),
+                health_error,
+                health_error.__traceback__,
+            )
+
+            print(
+                "================================================\n"
             )
 
     debug_query = st.text_input(
