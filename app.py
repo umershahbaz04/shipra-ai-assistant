@@ -5115,6 +5115,7 @@ def ask_shipra_project_ai(question, intent):
     primary_mcp_error = None
 
     try:
+        mcp_started = time.time()
         mcp_results = asyncio.run(
             collect_mcp_evidence(
                 question,
@@ -5122,6 +5123,7 @@ def ask_shipra_project_ai(question, intent):
                 [],
             )
         )
+        print(f"MCP PRIMARY TOTAL: {time.time() - mcp_started:.2f} sec")
     except Exception as error:
         primary_mcp_error = error
 
@@ -5233,6 +5235,16 @@ def ask_shipra_project_ai(question, intent):
         ]
 
     context = build_context(results, search_question)
+
+    # SPEED: keep full verified MCP results for code injection/fallback, but limit
+    # only the text sent to Gemini. This reduces prompt/token processing latency.
+    MAX_GEMINI_CONTEXT_CHARS = 24000
+    if len(context) > MAX_GEMINI_CONTEXT_CHARS:
+        context = context[:MAX_GEMINI_CONTEXT_CHARS]
+        print(
+            f"Gemini context capped at {MAX_GEMINI_CONTEXT_CHARS} chars "
+            "for faster generation."
+        )
 
     verification_scope = (
         "PARTIAL_ENTITY_ONLY"
@@ -5544,123 +5556,112 @@ Question:
 {question}
 """
 
-    models_to_try = [
-        PRIMARY_MODEL,
-        FALLBACK_MODEL,
-    ]
+    # FAIL-FAST GENERATION:
+    # Exactly one Gemini request. No hedge, no fallback-model wait, no retry loop,
+    # no sleep, and no separate guide-generation call.
+    model_name = PRIMARY_MODEL
+    gemini_started = time.time()
 
-    last_error = None
-
-    # FAST PATH:
-    # One generation request per model. The same response must contain both the
-    # Practical Scenario Guide and Actual Project Code Flow. This avoids the old
-    # second scenario-generation request and long retry/sleep loops.
-    for model_name in models_to_try:
-        try:
-            start = time.time()
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(
-                        thinking_level="low",
+    try:
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                thinking_config=types.ThinkingConfig(
+                    thinking_level="low",
+                ),
+                http_options=types.HttpOptions(
+                    timeout=20000,
+                    retry_options=types.HttpRetryOptions(
+                        attempts=1,
                     ),
                 ),
-            )
-            elapsed = time.time() - start
-            print(f"Gemini response time: {elapsed:.2f} seconds")
-            answer_text = (response.text or "").strip()
+            ),
+        )
+        elapsed = time.time() - gemini_started
+        print(f"GEMINI TOTAL [{model_name}]: {elapsed:.2f} sec")
+        answer_text = (response.text or "").strip()
 
-            if not answer_text:
-                raise ValueError("Gemini returned an empty response.")
+        if not answer_text:
+            raise ValueError("Gemini returned an empty response.")
 
-            # Do not make another model call for language correction. The original
-            # prompt already specifies the required response language.
-            if needs_language_retry(answer_text, response_language):
-                print(
-                    f"Language warning from {model_name}; "
-                    "keeping the first response to avoid another slow model call."
-                )
-
-            if (
-                intent == PROJECT_CHANGE
-                and proposed_implementation_is_incomplete(answer_text)
-            ):
-                print(
-                    f"Implementation quality warning from {model_name}; "
-                    "keeping the verified first response instead of making "
-                    "a second generation request."
-                )
-
-            if intent != PROJECT_CHANGE:
-                answer_text = re.split(
-                    r"(?im)^####\s+Proposed implementation\s*$",
-                    answer_text,
-                    maxsplit=1,
-                )[0].rstrip()
-
-            answer_text = normalize_answer_headings(answer_text)
-
-            scenario_marker = "### Practical Scenario Guide"
-            code_marker = "### Actual Project Code Flow"
-
-            # The main prompt already requires both sections. If the model omits
-            # either heading, fail over once to the fallback model rather than
-            # launching a separate guide-generation call.
-            if (
-                scenario_marker not in answer_text
-                or code_marker not in answer_text
-            ):
-                raise ValueError(
-                    "Gemini response omitted a required answer section."
-                )
-
-            # Keep the guide clean without another LLM call.
-            before_code, code_body = answer_text.split(code_marker, 1)
-            scenario_text = before_code.split(scenario_marker, 1)[1].strip()
-
-            scenario_text = re.sub(
-                r"```[A-Za-z0-9_+-]*\s*\n.*?```",
-                "",
-                scenario_text,
-                flags=re.DOTALL,
-            )
-            scenario_text = re.sub(
-                r"(?mi)^\s*(?:\*{0,2})?"
-                r"(?:File|Function/Class|Function|Symbol|Reference):.*$",
-                "",
-                scenario_text,
-            )
-            scenario_text = re.sub(
-                r"\n{3,}",
-                "\n\n",
-                scenario_text,
-            ).strip()
-
-            answer_text = (
-                f"{scenario_marker}\n{scenario_text}\n\n"
-                f"{code_marker}\n{code_body.strip()}"
+        if needs_language_retry(answer_text, response_language):
+            print(
+                "Gemini language warning; keeping the first response "
+                "instead of making another model call."
             )
 
-            verified_answer = inject_verified_code(
+        if (
+            intent == PROJECT_CHANGE
+            and proposed_implementation_is_incomplete(answer_text)
+        ):
+            print(
+                "Implementation quality warning; keeping the verified first "
+                "response instead of making another model call."
+            )
+
+        if intent != PROJECT_CHANGE:
+            answer_text = re.split(
+                r"(?im)^####\s+Proposed implementation\s*$",
                 answer_text,
-                code_cards,
-                minimum_cards=minimum_code_cards,
+                maxsplit=1,
+            )[0].rstrip()
+
+        answer_text = normalize_answer_headings(answer_text)
+
+        scenario_marker = "### Practical Scenario Guide"
+        code_marker = "### Actual Project Code Flow"
+
+        if (
+            scenario_marker not in answer_text
+            or code_marker not in answer_text
+        ):
+            raise ValueError(
+                "Gemini response omitted a required answer section."
             )
-            return verified_answer, results
 
-        except Exception as error:
-            last_error = error
-            print(f"Gemini error with {model_name}: {error}")
-            # No sleep and no repeated attempt. Immediately try the one fallback
-            # model, then use the verified MCP fallback below.
+        # Keep the guide clean locally; do not make a second AI request.
+        before_code, code_body = answer_text.split(code_marker, 1)
+        scenario_text = before_code.split(scenario_marker, 1)[1].strip()
 
-    print(
-        "All project AI models failed; using verified MCP evidence fallback: "
-        f"{last_error}"
-    )
-    return build_verified_mcp_fallback_answer(question, results), results
+        scenario_text = re.sub(
+            r"```[A-Za-z0-9_+-]*\s*\n.*?```",
+            "",
+            scenario_text,
+            flags=re.DOTALL,
+        )
+        scenario_text = re.sub(
+            r"(?mi)^\s*(?:\*{0,2})?"
+            r"(?:File|Function/Class|Function|Symbol|Reference):.*$",
+            "",
+            scenario_text,
+        )
+        scenario_text = re.sub(
+            r"\n{3,}",
+            "\n\n",
+            scenario_text,
+        ).strip()
 
+        answer_text = (
+            f"{scenario_marker}\n{scenario_text}\n\n"
+            f"{code_marker}\n{code_body.strip()}"
+        )
+
+        verified_answer = inject_verified_code(
+            answer_text,
+            code_cards,
+            minimum_cards=minimum_code_cards,
+        )
+        return verified_answer, results
+
+    except Exception as error:
+        elapsed = time.time() - gemini_started
+        print(
+            f"GEMINI FAILED [{model_name}] after {elapsed:.2f} sec: "
+            f"{type(error).__name__}: {error}"
+        )
+        print("Using verified MCP fallback immediately.")
+        return build_verified_mcp_fallback_answer(question, results), results
 
 def generate_project_prompt(question):
     response_language = get_response_language(question)
