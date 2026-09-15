@@ -76,16 +76,40 @@ def create_conversation(title="New chat"):
 
 
 def list_conversations(limit=40):
-    response = (
-        _chat_db()
-        .table("conversations")
-        .select("id,title,created_at,updated_at")
-        .order("updated_at", desc=True)
-        .limit(limit)
-        .execute()
-    )
-
-    return response.data or []
+    # Prefer persistent pin state when the optional `is_pinned` column exists.
+    # Fall back cleanly for existing deployments that have not added that column.
+    try:
+        response = (
+            _chat_db()
+            .table("conversations")
+            .select("id,title,created_at,updated_at,is_pinned")
+            .order("is_pinned", desc=True)
+            .order("updated_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return response.data or []
+    except Exception:
+        response = (
+            _chat_db()
+            .table("conversations")
+            .select("id,title,created_at,updated_at")
+            .order("updated_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        conversations = response.data or []
+        pinned_ids = st.session_state.get("pinned_conversation_ids", set())
+        for conversation in conversations:
+            conversation["is_pinned"] = conversation.get("id") in pinned_ids
+        conversations.sort(
+            key=lambda item: (
+                bool(item.get("is_pinned")),
+                str(item.get("updated_at") or ""),
+            ),
+            reverse=True,
+        )
+        return conversations
 
 
 def load_conversation(conversation_id):
@@ -155,6 +179,46 @@ def delete_conversation(conversation_id):
         .eq("id", conversation_id)
         .execute()
     )
+
+
+def rename_conversation(conversation_id, new_title):
+    """Rename an existing conversation without changing its messages."""
+    title = re.sub(r"\s+", " ", str(new_title or "")).strip()
+    if not title:
+        raise ValueError("Conversation title cannot be empty.")
+    if len(title) > 80:
+        title = title[:77].rstrip() + "..."
+
+    (
+        _chat_db()
+        .table("conversations")
+        .update({"title": title, "updated_at": utc_now_text()})
+        .eq("id", conversation_id)
+        .execute()
+    )
+
+
+def set_conversation_pinned(conversation_id, pinned):
+    """Pin/unpin a chat; persist in Supabase when schema supports it."""
+    pinned = bool(pinned)
+    try:
+        (
+            _chat_db()
+            .table("conversations")
+            .update({"is_pinned": pinned})
+            .eq("id", conversation_id)
+            .execute()
+        )
+        return True
+    except Exception:
+        # Backward-compatible fallback: pin survives Streamlit reruns in this session.
+        pinned_ids = set(st.session_state.get("pinned_conversation_ids", set()))
+        if pinned:
+            pinned_ids.add(conversation_id)
+        else:
+            pinned_ids.discard(conversation_id)
+        st.session_state["pinned_conversation_ids"] = pinned_ids
+        return False
 
 
 st.set_page_config(
@@ -5743,6 +5807,34 @@ for conversation in list_conversations():
     with menu_col:
         with st.popover("⋮"):
             st.caption(label)
+
+            is_pinned = bool(conversation.get("is_pinned"))
+            if st.button(
+                "Unpin chat" if is_pinned else "Pin chat",
+                key=f"pin_chat_{conversation_id}",
+                use_container_width=True,
+            ):
+                set_conversation_pinned(conversation_id, not is_pinned)
+                st.rerun()
+
+            new_title = st.text_input(
+                "Edit conversation name",
+                value=label,
+                key=f"edit_title_{conversation_id}",
+                label_visibility="collapsed",
+                placeholder="Conversation name",
+            )
+            if st.button(
+                "Save name",
+                key=f"save_title_{conversation_id}",
+                use_container_width=True,
+            ):
+                cleaned_title = re.sub(r"\s+", " ", new_title).strip()
+                if not cleaned_title:
+                    st.warning("Conversation name cannot be empty.")
+                else:
+                    rename_conversation(conversation_id, cleaned_title)
+                    st.rerun()
 
             if st.button(
                 "Delete chat",
