@@ -4691,82 +4691,68 @@ def _filter_orders_for_status(orders, wanted_status):
 
 
 async def get_verified_order_status_count(status_key):
-    """MCP-first status lookup, validated against returned records, with file fallback."""
+    """Single deterministic path for every order-status count query."""
     wanted_status = str(status_key or "").strip()
     if not wanted_status:
         return None
 
-    # Ask MCP for ALL mock orders, then filter deterministically here. This avoids
-    # server-side schema/alias mismatches such as status vs orderStatusName.
-    mcp_orders = None
-    mcp_file_path = None
+    # Use the dedicated MCP status tool. The server loads the complete orders.json
+    # and applies the same normalization to every status; an empty match is valid
+    # only when the server confirms how many source records it checked.
     try:
         params = get_mcp_server_params()
         async with asyncio.timeout(30):
             async with Client(params) as mcp_client:
                 result = await mcp_client.call_tool(
-                    "search_mock_orders",
-                    {
-                        "labels": None,
-                        "payment_method": None,
-                        "status": None,
-                        "exclude_status": None,
-                        "carrier": None,
-                    },
+                    "get_orders_by_status",
+                    {"status": wanted_status},
                 )
         if not getattr(result, "is_error", False):
             payload = _extract_mcp_payload(result)
             for _ in range(5):
                 if not isinstance(payload, dict):
                     break
-                if payload.get("status") == "ok" or "orders" in payload or "matches" in payload:
+                if payload.get("status") == "ok" and "orders" in payload:
                     break
                 child = next((payload.get(k) for k in ("result", "data", "content", "value") if isinstance(payload.get(k), dict)), None)
                 if child is None:
                     break
                 payload = child
-            if isinstance(payload, dict) and payload.get("status") == "ok":
-                candidate = payload.get("orders")
-                if candidate is None:
-                    candidate = payload.get("matches")
-                if isinstance(candidate, dict):
-                    candidate = [candidate]
-                if isinstance(candidate, list):
-                    mcp_orders = [x for x in candidate if isinstance(x, dict)]
-                    mcp_file_path = payload.get("resolved_path") or payload.get("file_path")
+            if (
+                isinstance(payload, dict)
+                and payload.get("status") == "ok"
+                and isinstance(payload.get("orders"), list)
+                and isinstance(payload.get("total_records_checked"), int)
+            ):
+                orders = [x for x in payload["orders"] if isinstance(x, dict)]
+                return {
+                    "count": len(orders),
+                    "status_key": _normalize_order_status(wanted_status).replace(" ", "_"),
+                    "status_label": wanted_status,
+                    "orders": orders,
+                    "data_source": "mcp_mock",
+                    "file_path": payload.get("resolved_path") or payload.get("file_path") or "mock-data/orders.json",
+                    "total_records_checked": payload["total_records_checked"],
+                }
     except Exception:
-        mcp_orders = None
+        pass
 
-    # If MCP supplied records, they are the primary source. Filter locally using
-    # all supported status field aliases so Pending/Delivered/etc. cannot be lost.
-    if mcp_orders:
-        matches = _filter_orders_for_status(mcp_orders, wanted_status)
-        return {
-            "count": len(matches),
-            "status_key": _normalize_order_status(wanted_status).replace(" ", "_"),
-            "status_label": wanted_status,
-            "orders": matches,
-            "data_source": "mcp_mock",
-            "file_path": mcp_file_path or "mock-data/orders.json",
-            "total_records_checked": len(mcp_orders),
-        }
-
-    # A zero/empty MCP dataset is not accepted as proof of zero. Read the exact
-    # deployed orders.json as a deterministic fallback and calculate again.
+    # Deployment-safe fallback: calculate from the exact local JSON. A missing or
+    # unreadable file is NOT converted into zero.
     local_orders, local_path = _load_local_verified_orders()
-    if local_orders is not None:
-        matches = _filter_orders_for_status(local_orders, wanted_status)
-        return {
-            "count": len(matches),
-            "status_key": _normalize_order_status(wanted_status).replace(" ", "_"),
-            "status_label": wanted_status,
-            "orders": matches,
-            "data_source": "local_verified_mock_fallback",
-            "file_path": local_path or "mock-data/orders.json",
-            "total_records_checked": len(local_orders),
-        }
+    if local_orders is None:
+        return None
+    matches = _filter_orders_for_status(local_orders, wanted_status)
+    return {
+        "count": len(matches),
+        "status_key": _normalize_order_status(wanted_status).replace(" ", "_"),
+        "status_label": wanted_status,
+        "orders": matches,
+        "data_source": "local_verified_mock_fallback",
+        "file_path": local_path or "mock-data/orders.json",
+        "total_records_checked": len(local_orders),
+    }
 
-    return None
 
 def _first_order_value(record, *names):
     """Pick the first non-empty value across common mock-order field aliases."""
