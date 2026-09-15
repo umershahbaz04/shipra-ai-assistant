@@ -563,9 +563,19 @@ def search_mock_orders(
 
 
 
+# Shipra business-level order status groups.
+# Only grouped labels (such as "pending") expand to multiple internal statuses.
+# Exact internal-status questions (for example "assigned") still match only that status.
+ORDER_STATUS_GROUPS = {
+    "pending": {"pending", "ready for assignment", "assigned"},
+}
+
+
 def _normalize_mock_status(value) -> str:
     """Canonical comparison form for order statuses without changing meaning."""
     text = str(value or "").strip().casefold().replace("_", " ").replace("-", " ")
+    # Also split common compact/PascalCase values used by Shipra mock data.
+    text = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(value or "").strip()).casefold().replace("_", " ").replace("-", " ")
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -604,9 +614,10 @@ def get_orders_by_status(status: str) -> dict:
             "resolved_path": path,
         }
 
+    allowed_statuses = ORDER_STATUS_GROUPS.get(wanted, {wanted})
     matches = [
         order for order in orders
-        if _normalize_mock_status(_mock_order_status(order)) == wanted
+        if _normalize_mock_status(_mock_order_status(order)) in allowed_statuses
     ]
     return {
         "status": "ok",
