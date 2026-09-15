@@ -4586,9 +4586,19 @@ def build_verified_evidence_gap_answer(question):
 
 
 
+# Shipra business-level order status groups.
+# "pending" is a business bucket containing these internal order statuses.
+# Asking for an exact internal status such as "assigned" remains exact.
+ORDER_STATUS_GROUPS = {
+    "pending": {"pending", "ready for assignment", "assigned"},
+}
+
+
 def _normalize_order_status(value):
-    """Normalize order-status text without merging different business concepts."""
-    text = str(value or "").strip().casefold().replace("_", " ").replace("-", " ")
+    """Normalize Shipra order-status text for deterministic comparison."""
+    raw = str(value or "").strip()
+    raw = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", raw)
+    text = raw.casefold().replace("_", " ").replace("-", " ")
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -4680,12 +4690,13 @@ def _load_local_verified_orders():
 
 def _filter_orders_for_status(orders, wanted_status):
     wanted = _normalize_order_status(wanted_status)
+    allowed_statuses = ORDER_STATUS_GROUPS.get(wanted, {wanted})
     output = []
     for order in orders or []:
         if not isinstance(order, dict):
             continue
         current = _normalize_order_status(_order_status_from_record(order))
-        if current == wanted:
+        if current in allowed_statuses:
             output.append(order)
     return output
 
