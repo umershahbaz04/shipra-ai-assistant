@@ -4969,7 +4969,7 @@ def build_order_count_answer(status_result, response_language):
 
 
 def build_verified_mcp_fallback_answer(question, mcp_results):
-    """Return a safe answer from already-verified MCP evidence if all AI models fail."""
+    """Render MCP-verified evidence professionally when Gemini is unavailable."""
     response_language = get_response_language(question)
     results = list(mcp_results or [])
 
@@ -4978,14 +4978,14 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
             return (
                 "### Practical Scenario Guide\n"
                 "Verified MCP evidence available nahi hai, is liye exact steps invent nahi kiye ja rahe.\n\n"
-                "Expected Result: Verified source milne par exact workflow bataya jayega.\n\n"
+                "**Expected Result:** Verified source milne par exact workflow bataya jayega.\n\n"
                 "### Actual Project Code Flow\n"
                 "MCP se verified source evidence retrieve nahi hua."
             )
         return (
             "### Practical Scenario Guide\n"
             "Verified MCP evidence is unavailable, so exact steps are not being invented.\n\n"
-            "Expected Result: The exact workflow can be provided when verified source evidence is available.\n\n"
+            "**Expected Result:** The exact workflow can be provided when verified source evidence is available.\n\n"
             "### Actual Project Code Flow\n"
             "No verified MCP source evidence was retrieved."
         )
@@ -4993,37 +4993,82 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
     if response_language == "Roman Urdu":
         parts = [
             "### Practical Scenario Guide",
-            "1. Shipra mein requested feature ka existing section/view open karein.",
-            "2. Screen par available verified controls aur fields ko use karke required information review ya enter karein.",
-            "3. Available verified action se process complete karein.",
+            "1. Shipra mein requested feature ka verified section/view open karein.",
+            "2. Screen par available verified fields ya controls mein required information enter/select karein.",
+            "3. Verified action ko perform karke workflow complete karein.",
             "",
-            "Expected Result: Requested workflow verified project evidence ke mutabiq complete hoga.",
+            "**Expected Result:** Requested workflow verified project evidence ke mutabiq complete hoga.",
             "",
             "### Actual Project Code Flow",
-            "AI model temporary unavailable tha; neeche sirf MCP-verified source evidence diya ja raha hai.",
+            "Gemini response available nahi tha, is liye neeche sirf MCP-verified project code dikhaya gaya hai.",
         ]
+        explanation_heading = "**Is code mein kya ho raha hai:**"
     else:
         parts = [
             "### Practical Scenario Guide",
-            "1. Open the existing Shipra section or view for the requested feature.",
-            "2. Use the verified controls and fields on that screen to review or enter the required information.",
-            "3. Complete the workflow using the verified action available on that screen.",
+            "1. Open the verified Shipra section/view for the requested feature.",
+            "2. Enter or select the required information using the verified fields or controls.",
+            "3. Perform the verified action to complete the workflow.",
             "",
-            "Expected Result: The requested workflow is completed according to verified project evidence.",
+            "**Expected Result:** The requested workflow is completed according to verified project evidence.",
             "",
             "### Actual Project Code Flow",
-            "The AI model was temporarily unavailable; only MCP-verified source evidence is shown below.",
+            "Gemini response was unavailable, so only MCP-verified project code is shown below.",
         ]
+        explanation_heading = "**What this code shows:**"
 
-    for i, result in enumerate(results[:8], 1):
+    shown = 0
+    for result in results:
+        # Do not dump generic documentation/mock chunks as giant code blocks.
+        if result.get("source_type") != "actual_code":
+            continue
+
+        snippet = extract_exact_snippet(result, question)
+        if not snippet:
+            continue
+
         path = str(result.get("file_path") or "Unknown file")
         symbol = str(result.get("symbol") or "Not detected")
-        snippet = str(result.get("text") or "").strip()
-        if len(snippet) > 1800:
-            snippet = snippet[:1800].rstrip() + "\n..."
-        parts.extend(["", f"**Source {i}:** `{path}`", f"**Function/Class:** `{symbol}`"])
-        if snippet:
-            parts.extend(["", "```text", snippet, "```"])
+        language = code_language(path)
+
+        # Keep fallback readable. Exact snippet extraction remains the source of truth.
+        if len(snippet) > 2600:
+            snippet = snippet[:2600].rstrip() + "\n// ..."
+
+        shown += 1
+        parts.extend([
+            "",
+            f"#### Verified Source {shown}",
+            f"**File:** `{path}`",
+            f"**Function/Class:** `{symbol}`",
+            "",
+            f"```{language}",
+            snippet,
+            "```",
+            "",
+            explanation_heading,
+            (
+                "Yeh exact MCP-verified source excerpt hai jo requested feature se match karta hai."
+                if response_language == "Roman Urdu"
+                else
+                "This is the exact MCP-verified source excerpt matched to the requested feature."
+            ),
+        ])
+
+        # Avoid an unreadable wall of code in the fallback response.
+        if shown >= 4:
+            break
+
+    if shown == 0:
+        parts.extend([
+            "",
+            (
+                "Relevant executable source snippet verify nahi hua; is liye raw unrelated code dump nahi kiya gaya."
+                if response_language == "Roman Urdu"
+                else
+                "No relevant executable source snippet was verified, so unrelated raw code was not dumped."
+            ),
+        ])
 
     return "\n".join(parts)
 
