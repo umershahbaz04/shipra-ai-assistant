@@ -4,6 +4,7 @@ import json
 import math
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 import asyncio
 import html
 import uuid
@@ -5544,119 +5545,162 @@ Question:
 {question}
 """
 
-    models_to_try = [
-        PRIMARY_MODEL,
-        FALLBACK_MODEL,
-    ]
+    def _generate_with_model(model_name):
+        start_time = time.time()
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                thinking_config=types.ThinkingConfig(
+                    thinking_level="low",
+                ),
+            ),
+        )
+        elapsed = time.time() - start_time
+        print(f"Gemini response time [{model_name}]: {elapsed:.2f} seconds")
+        answer_text = (response.text or "").strip()
+        if not answer_text:
+            raise ValueError(f"{model_name} returned an empty response.")
+        return model_name, answer_text
+
+    def _finalize_project_answer(model_name, answer_text):
+        # No second LLM call: keep the same local validation/cleanup behavior.
+        if needs_language_retry(answer_text, response_language):
+            print(
+                f"Language warning from {model_name}; "
+                "keeping response to avoid another model call."
+            )
+
+        if (
+            intent == PROJECT_CHANGE
+            and proposed_implementation_is_incomplete(answer_text)
+        ):
+            print(
+                f"Implementation quality warning from {model_name}; "
+                "keeping verified response without another generation call."
+            )
+
+        if intent != PROJECT_CHANGE:
+            answer_text = re.split(
+                r"(?im)^####\s+Proposed implementation\s*$",
+                answer_text,
+                maxsplit=1,
+            )[0].rstrip()
+
+        answer_text = normalize_answer_headings(answer_text)
+
+        scenario_marker = "### Practical Scenario Guide"
+        code_marker = "### Actual Project Code Flow"
+
+        if scenario_marker not in answer_text or code_marker not in answer_text:
+            raise ValueError(
+                f"{model_name} response omitted a required answer section."
+            )
+
+        before_code, code_body = answer_text.split(code_marker, 1)
+        scenario_text = before_code.split(scenario_marker, 1)[1].strip()
+
+        # Guide-only cleanup remains local and does not trigger another AI call.
+        scenario_text = re.sub(
+            r"```[A-Za-z0-9_+-]*\s*\n.*?```",
+            "",
+            scenario_text,
+            flags=re.DOTALL,
+        )
+        scenario_text = re.sub(
+            r"(?mi)^\s*(?:\*{0,2})?"
+            r"(?:File|Function/Class|Function|Symbol|Reference):.*$",
+            "",
+            scenario_text,
+        )
+        scenario_text = re.sub(r"\n{3,}", "\n\n", scenario_text).strip()
+
+        answer_text = (
+            f"{scenario_marker}\n{scenario_text}\n\n"
+            f"{code_marker}\n{code_body.strip()}"
+        )
+
+        return inject_verified_code(
+            answer_text,
+            code_cards,
+            minimum_cards=minimum_code_cards,
+        )
 
     last_error = None
+    executor = ThreadPoolExecutor(max_workers=2)
+    primary_future = executor.submit(_generate_with_model, PRIMARY_MODEL)
+    futures = {primary_future: PRIMARY_MODEL}
+    fallback_started = False
 
-    # FAST PATH:
-    # One generation request per model. The same response must contain both the
-    # Practical Scenario Guide and Actual Project Code Flow. This avoids the old
-    # second scenario-generation request and long retry/sleep loops.
-    for model_name in models_to_try:
-        try:
-            start = time.time()
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(
-                        thinking_level="low",
-                    ),
-                ),
+    try:
+        # Give the primary model a 5-second head start.
+        done, _ = wait(
+            [primary_future],
+            timeout=5.0,
+            return_when=FIRST_COMPLETED,
+        )
+
+        if not done:
+            print(
+                f"{PRIMARY_MODEL} exceeded 5 seconds; "
+                f"starting hedged fallback {FALLBACK_MODEL}."
             )
-            elapsed = time.time() - start
-            print(f"Gemini response time: {elapsed:.2f} seconds")
-            answer_text = (response.text or "").strip()
-
-            if not answer_text:
-                raise ValueError("Gemini returned an empty response.")
-
-            # Do not make another model call for language correction. The original
-            # prompt already specifies the required response language.
-            if needs_language_retry(answer_text, response_language):
-                print(
-                    f"Language warning from {model_name}; "
-                    "keeping the first response to avoid another slow model call."
-                )
-
-            if (
-                intent == PROJECT_CHANGE
-                and proposed_implementation_is_incomplete(answer_text)
-            ):
-                print(
-                    f"Implementation quality warning from {model_name}; "
-                    "keeping the verified first response instead of making "
-                    "a second generation request."
-                )
-
-            if intent != PROJECT_CHANGE:
-                answer_text = re.split(
-                    r"(?im)^####\s+Proposed implementation\s*$",
-                    answer_text,
-                    maxsplit=1,
-                )[0].rstrip()
-
-            answer_text = normalize_answer_headings(answer_text)
-
-            scenario_marker = "### Practical Scenario Guide"
-            code_marker = "### Actual Project Code Flow"
-
-            # The main prompt already requires both sections. If the model omits
-            # either heading, fail over once to the fallback model rather than
-            # launching a separate guide-generation call.
-            if (
-                scenario_marker not in answer_text
-                or code_marker not in answer_text
-            ):
-                raise ValueError(
-                    "Gemini response omitted a required answer section."
-                )
-
-            # Keep the guide clean without another LLM call.
-            before_code, code_body = answer_text.split(code_marker, 1)
-            scenario_text = before_code.split(scenario_marker, 1)[1].strip()
-
-            scenario_text = re.sub(
-                r"```[A-Za-z0-9_+-]*\s*\n.*?```",
-                "",
-                scenario_text,
-                flags=re.DOTALL,
+            fallback_future = executor.submit(
+                _generate_with_model,
+                FALLBACK_MODEL,
             )
-            scenario_text = re.sub(
-                r"(?mi)^\s*(?:\*{0,2})?"
-                r"(?:File|Function/Class|Function|Symbol|Reference):.*$",
-                "",
-                scenario_text,
-            )
-            scenario_text = re.sub(
-                r"\n{3,}",
-                "\n\n",
-                scenario_text,
-            ).strip()
+            futures[fallback_future] = FALLBACK_MODEL
+            fallback_started = True
 
-            answer_text = (
-                f"{scenario_marker}\n{scenario_text}\n\n"
-                f"{code_marker}\n{code_body.strip()}"
+        while futures:
+            done, _ = wait(
+                list(futures.keys()),
+                return_when=FIRST_COMPLETED,
             )
 
-            verified_answer = inject_verified_code(
-                answer_text,
-                code_cards,
-                minimum_cards=minimum_code_cards,
-            )
-            return verified_answer, results
+            for future in done:
+                model_name = futures.pop(future)
+                try:
+                    returned_model, answer_text = future.result()
+                    verified_answer = _finalize_project_answer(
+                        returned_model,
+                        answer_text,
+                    )
 
-        except Exception as error:
-            last_error = error
-            print(f"Gemini error with {model_name}: {error}")
-            # No sleep and no repeated attempt. Immediately try the one fallback
-            # model, then use the verified MCP fallback below.
+                    # Do not wait for the slower hedged request before returning.
+                    for pending_future in futures:
+                        pending_future.cancel()
+                    executor.shutdown(wait=False, cancel_futures=True)
+
+                    print(f"Using first valid Gemini response: {returned_model}")
+                    return verified_answer, results
+
+                except Exception as error:
+                    last_error = error
+                    print(f"Gemini error with {model_name}: {error}")
+
+                    # If primary failed before the 5-second hedge was needed,
+                    # start fallback immediately.
+                    if (
+                        model_name == PRIMARY_MODEL
+                        and not fallback_started
+                    ):
+                        fallback_future = executor.submit(
+                            _generate_with_model,
+                            FALLBACK_MODEL,
+                        )
+                        futures[fallback_future] = FALLBACK_MODEL
+                        fallback_started = True
+
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    except Exception as hedge_error:
+        last_error = hedge_error
+        executor.shutdown(wait=False, cancel_futures=True)
+        print(f"Hedged Gemini generation error: {hedge_error}")
 
     print(
-        "All project AI models failed; using verified MCP evidence fallback: "
+        "Both Gemini paths failed; using verified MCP evidence fallback: "
         f"{last_error}"
     )
     return build_verified_mcp_fallback_answer(question, results), results
