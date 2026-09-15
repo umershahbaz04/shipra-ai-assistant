@@ -4965,6 +4965,66 @@ def build_order_count_answer(status_result, response_language):
     return f"{heading}\n\nNo matching order records were found in the verified MCP mock data."
 
 
+def build_verified_mcp_fallback_answer(question, mcp_results):
+    """Return a safe answer from already-verified MCP evidence if all AI models fail."""
+    response_language = get_response_language(question)
+    results = list(mcp_results or [])
+
+    if not results:
+        if response_language == "Roman Urdu":
+            return (
+                "### Practical Scenario Guide\n"
+                "Verified MCP evidence available nahi hai, is liye exact steps invent nahi kiye ja rahe.\n\n"
+                "Expected Result: Verified source milne par exact workflow bataya jayega.\n\n"
+                "### Actual Project Code Flow\n"
+                "MCP se verified source evidence retrieve nahi hua."
+            )
+        return (
+            "### Practical Scenario Guide\n"
+            "Verified MCP evidence is unavailable, so exact steps are not being invented.\n\n"
+            "Expected Result: The exact workflow can be provided when verified source evidence is available.\n\n"
+            "### Actual Project Code Flow\n"
+            "No verified MCP source evidence was retrieved."
+        )
+
+    if response_language == "Roman Urdu":
+        parts = [
+            "### Practical Scenario Guide",
+            "1. Shipra mein requested feature ka existing section/view open karein.",
+            "2. Screen par available verified controls aur fields ko use karke required information review ya enter karein.",
+            "3. Available verified action se process complete karein.",
+            "",
+            "Expected Result: Requested workflow verified project evidence ke mutabiq complete hoga.",
+            "",
+            "### Actual Project Code Flow",
+            "AI model temporary unavailable tha; neeche sirf MCP-verified source evidence diya ja raha hai.",
+        ]
+    else:
+        parts = [
+            "### Practical Scenario Guide",
+            "1. Open the existing Shipra section or view for the requested feature.",
+            "2. Use the verified controls and fields on that screen to review or enter the required information.",
+            "3. Complete the workflow using the verified action available on that screen.",
+            "",
+            "Expected Result: The requested workflow is completed according to verified project evidence.",
+            "",
+            "### Actual Project Code Flow",
+            "The AI model was temporarily unavailable; only MCP-verified source evidence is shown below.",
+        ]
+
+    for i, result in enumerate(results[:8], 1):
+        path = str(result.get("file_path") or "Unknown file")
+        symbol = str(result.get("symbol") or "Not detected")
+        snippet = str(result.get("text") or "").strip()
+        if len(snippet) > 1800:
+            snippet = snippet[:1800].rstrip() + "\n..."
+        parts.extend(["", f"**Source {i}:** `{path}`", f"**Function/Class:** `{symbol}`"])
+        if snippet:
+            parts.extend(["", "```text", snippet, "```"])
+
+    return "\n".join(parts)
+
+
 def ask_shipra_project_ai(question, intent):
     response_language = get_response_language(question)
     code_explanation_heading = (
@@ -5646,7 +5706,13 @@ Do not add headings, code, technical explanation, sources, references, or file p
 
                 break
 
-    raise last_error
+    # All configured models failed. Keep the verified MCP evidence usable
+    # instead of exposing a raw provider 503/high-demand error to the user.
+    print(
+        "All project AI models failed; using verified MCP evidence fallback: "
+        f"{last_error}"
+    )
+    return build_verified_mcp_fallback_answer(question, results), results
 
 
 def generate_project_prompt(question):
