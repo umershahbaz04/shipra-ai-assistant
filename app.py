@@ -5862,8 +5862,57 @@ for conversation in list_conversations():
                 st.rerun()
 
 
+
+def render_message_copy_button(content, key):
+    """Render a compact copy action directly below a chat message."""
+    safe_text = html.escape(str(content or ""), quote=True)
+    safe_key = re.sub(r"[^a-zA-Z0-9_-]", "_", str(key))
+
+    st.components.v1.html(
+        f"""
+        <div style="height:32px;display:flex;align-items:center;">
+          <button
+            id="copy-{safe_key}"
+            title="Copy"
+            aria-label="Copy message"
+            style="
+              display:inline-flex;align-items:center;gap:6px;padding:4px 8px;
+              border:0;border-radius:7px;background:transparent;color:#9b9b9b;
+              cursor:pointer;font:12px system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+            "
+            onclick="copyMessage_{safe_key}()"
+          >
+            <span style="font-size:15px;line-height:1;">⧉</span>
+            <span id="copy-label-{safe_key}">Copy</span>
+          </button>
+        </div>
+        <textarea id="copy-text-{safe_key}" style="display:none;">{safe_text}</textarea>
+        <script>
+          async function copyMessage_{safe_key}() {{
+            const text = document.getElementById("copy-text-{safe_key}").value;
+            const label = document.getElementById("copy-label-{safe_key}");
+            try {{
+              await navigator.clipboard.writeText(text);
+              label.textContent = "Copied";
+              setTimeout(() => label.textContent = "Copy", 1200);
+            }} catch (err) {{
+              const area = document.getElementById("copy-text-{safe_key}");
+              area.style.display = "block";
+              area.select();
+              document.execCommand("copy");
+              area.style.display = "none";
+              label.textContent = "Copied";
+              setTimeout(() => label.textContent = "Copy", 1200);
+            }}
+          }}
+        </script>
+        """,
+        height=32,
+    )
+
+
 # Render the selected conversation above the sticky composer.
-for message in st.session_state["chat_history"]:
+for message_index, message in enumerate(st.session_state["chat_history"]):
     if message["role"] == "user":
         safe_user_text = html.escape(
             str(message["content"])
@@ -5879,12 +5928,20 @@ for message in st.session_state["chat_history"]:
             """,
             unsafe_allow_html=True,
         )
+        render_message_copy_button(
+            message["content"],
+            f"history_user_{message_index}",
+        )
     else:
         with st.chat_message(
             "assistant",
             avatar=":material/auto_awesome:",
         ):
             st.markdown(message["content"])
+            render_message_copy_button(
+                message["content"],
+                f"history_assistant_{message_index}",
+            )
 
 
 # Native Streamlit chat input stays pinned to the bottom of the viewport.
@@ -5918,6 +5975,10 @@ if question:
         """,
         unsafe_allow_html=True,
     )
+    render_message_copy_button(
+        question,
+        "live_user_message",
+    )
 
     with st.chat_message(
         "assistant",
@@ -5934,6 +5995,10 @@ if question:
                 st.stop()
 
         st.markdown(answer)
+        render_message_copy_button(
+            answer,
+            "live_assistant_message",
+        )
 
         if sources:
             with st.expander("Sources"):
