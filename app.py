@@ -5360,6 +5360,12 @@ PRACTICAL GUIDE QUALITY RULES:
   create a UI step by itself.
 - If only part of the workflow is verified, provide only those steps and clearly
   identify the missing user-facing evidence rather than filling the gap.
+- Practical Scenario Guide is GUIDE ONLY: no code blocks, source snippets, file paths,
+  Function/Class labels, API/handler/repository names, or code explanation may appear
+  there. Put every technical/code explanation after it under Actual Project Code Flow.
+- Keep the section order fixed: Practical Scenario Guide first, Actual Project Code
+  Flow second, and Proposed implementation later only when the existing project-change
+  rules require it.
 
 If the user explicitly requests a code change AND the detected request type
 is project_change:
@@ -5436,12 +5442,12 @@ Rules:
 - Mention screen/control names only when MCP-verified frontend evidence supports them.
 - If exact navigation/menu/button text is not verified, use a truthful neutral action
   such as "Open the existing Draft Orders view" rather than inventing menu clicks.
-- You MAY add a short file reference at the end of a step when it materially supports
-  that step, formatted exactly as:
-  Reference: <verified frontend file path>
-- NEVER include code or fenced code blocks.
-- NEVER include Function/Class labels.
-- Do not explain source code in this guide.
+- The guide must contain ONLY user-facing steps plus the final Expected Result line.
+- NEVER include source code, code snippets, fenced code blocks, file paths, references,
+  Function/Class labels, API names, handler names, repository names, or implementation
+  explanations inside the Practical Scenario Guide.
+- Do not explain source code in this guide; all technical/code explanation belongs
+  later under Actual Project Code Flow.
 - Do not dump file contents.
 - Do not derive UI steps from backend-only evidence.
 - The requested entity AND requested operation must match the verified evidence.
@@ -5540,59 +5546,79 @@ site assumption instead of inventing a project variable.
                     and "### Actual Project Code Flow" in answer_text
                 )
 
-                if not has_required_sections:
+                # Always generate the Practical Scenario Guide separately so it
+                # stays a clean user-facing workflow and can never inherit code
+                # snippets or technical explanation from the main answer.
+                scenario_response = client.models.generate_content(
+                    model=model_name,
+                    contents=scenario_prompt,
+                )
+                scenario_text = scenario_response.text.strip()
+
+                if needs_language_retry(
+                    scenario_text,
+                    response_language,
+                ):
+                    scenario_correction_prompt = (
+                        scenario_prompt
+                        + f"""
+
+LANGUAGE CORRECTION REQUIRED
+Rewrite the scenario guide in {response_language} only.
+Keep only numbered user-facing steps and one Expected Result line.
+Do not add headings, code, technical explanation, sources, references, or file paths.
+"""
+                    )
                     scenario_response = client.models.generate_content(
                         model=model_name,
-                        contents=scenario_prompt,
+                        contents=scenario_correction_prompt,
                     )
                     scenario_text = scenario_response.text.strip()
-
                     if needs_language_retry(
                         scenario_text,
                         response_language,
                     ):
-                        scenario_correction_prompt = (
-                            scenario_prompt
-                            + f"""
-
-LANGUAGE CORRECTION REQUIRED
-Rewrite the scenario guide in {response_language} only.
-Do not add headings, code, sources, or file paths.
-"""
+                        raise ValueError(
+                            "Scenario guide did not satisfy the required language."
                         )
-                        scenario_response = client.models.generate_content(
-                            model=model_name,
-                            contents=scenario_correction_prompt,
-                        )
-                        scenario_text = scenario_response.text.strip()
-                        if needs_language_retry(
-                            scenario_text,
-                            response_language,
-                        ):
-                            raise ValueError(
-                                "Scenario guide did not satisfy the required language."
-                            )
 
-                    scenario_marker = "### Practical Scenario Guide"
-                    code_marker = "### Actual Project Code Flow"
+                # Defensive cleanup: even if the model ignores the guide prompt,
+                # code fences and technical source-card labels cannot remain here.
+                scenario_text = re.sub(
+                    r"```[A-Za-z0-9_+-]*\\s*\\n.*?```",
+                    "",
+                    scenario_text,
+                    flags=re.DOTALL,
+                )
+                scenario_text = re.sub(
+                    r"(?mi)^\\s*(?:\\*{0,2})?(?:File|Function/Class|Function|Symbol|Reference):.*$",
+                    "",
+                    scenario_text,
+                )
+                scenario_text = re.sub(r"\\n{3,}", "\\n\\n", scenario_text).strip()
+
+                scenario_marker = "### Practical Scenario Guide"
+                code_marker = "### Actual Project Code Flow"
+
+                # Preserve the already-generated technical/code section exactly as
+                # before; only replace the guide body.
+                if code_marker in answer_text:
+                    code_body = answer_text.split(code_marker, 1)[1].strip()
+                else:
                     code_body = answer_text
-
-                    if code_marker in answer_text:
-                        code_body = answer_text.split(code_marker, 1)[1]
-                    elif scenario_marker in answer_text:
-                        scenario_text = answer_text.split(
-                            scenario_marker, 1
-                        )[1].strip()
+                    if scenario_marker in code_body:
+                        code_body = code_body.split(scenario_marker, 1)[0].strip()
+                    if not code_body:
                         code_body = (
                             "A separate code-flow section was not generated."
                             if response_language == "English"
                             else "Alag code-flow section generate nahi hua."
                         )
 
-                    answer_text = (
-                        f"{scenario_marker}\n{scenario_text.strip()}\n\n"
-                        f"{code_marker}\n{code_body.strip()}"
-                    )
+                answer_text = (
+                    f"{scenario_marker}\n{scenario_text}\n\n"
+                    f"{code_marker}\n{code_body}"
+                )
 
                 verified_answer = inject_verified_code(
                     answer_text,
