@@ -1230,6 +1230,10 @@ if st.sidebar.button(
             f"MCP connection failed: {type(error).__name__}: {error}"
         )
 
+File "/mount/src/shipra-ai-assistant/app.py", line 1299
+              st.error(
+             ^
+IndentationError: unexpected indent
 
 with st.sidebar.expander("MCP Debug"):
     st.caption("Temporary diagnostic tool")
@@ -1266,35 +1270,6 @@ with st.sidebar.expander("MCP Debug"):
 
         except Exception as health_error:
             import traceback
-def parse_json_object(text):
-    """Parse the first JSON object from a model response without requiring a pristine reply."""
-    cleaned = (text or "").strip()
-    cleaned = re.sub(
-        r"^```(?:json)?\s*|\s*```$",
-        "",
-        cleaned,
-        flags=re.IGNORECASE,
-    ).strip()
-
-    try:
-        value = json.loads(cleaned)
-        if isinstance(value, dict):
-            return value
-    except json.JSONDecodeError:
-        pass
-
-    decoder = json.JSONDecoder()
-    for position, character in enumerate(cleaned):
-        if character != "{":
-            continue
-        try:
-            value, _ = decoder.raw_decode(cleaned[position:])
-        except json.JSONDecodeError:
-            continue
-        if isinstance(value, dict):
-            return value
-
-    return None
 
             st.error(
                 "Source health check failed: "
