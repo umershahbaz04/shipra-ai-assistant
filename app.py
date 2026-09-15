@@ -4325,12 +4325,12 @@ def ask_shipra_project_ai(question, intent):
         else question
     )
 
-    results = search_documentation(search_question, top_k=15)
-    results = filter_relevant_results(results, search_question)
-
+    # MCP-FIRST: query the live Shipra source before consulting the RAG index.
+    # RAG is deliberately kept out of the initial MCP evidence collection so
+    # indexed/semantic neighbours cannot bias the live-code investigation.
     try:
         mcp_results = asyncio.run(
-            collect_mcp_evidence(question, conversation_text, results)
+            collect_mcp_evidence(question, conversation_text, [])
         )
     except Exception as error:
         mcp_results = []
@@ -4354,6 +4354,12 @@ def ask_shipra_project_ai(question, intent):
         with st.expander("MCP error details"):
             for message in collect_error_messages(error):
                 st.text(message)
+
+    # RAG-SECOND: only after MCP has completed (or failed), retrieve indexed
+    # context. It remains supporting/fallback evidence; live MCP evidence is
+    # merged first below and therefore has source-of-truth priority.
+    results = search_documentation(search_question, top_k=15)
+    results = filter_relevant_results(results, search_question)
 
     if mcp_results:
         def canonical_path(path):
