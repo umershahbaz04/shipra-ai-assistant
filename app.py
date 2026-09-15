@@ -5346,6 +5346,21 @@ If existing functionality directly supports the requested operation:
 - Do not add a Proposed implementation section for a usage question.
 - Do not create a replacement form, service, or API wrapper unnecessarily.
 
+PRACTICAL GUIDE QUALITY RULES:
+- The Practical Scenario Guide must be a true chronological user workflow, not a
+  summary of source-code execution.
+- Use numbered steps in "first -> next -> then -> finish" order.
+- Keep each step focused on one main action and avoid implementation internals.
+- Never describe React state setup, useEffect execution, JSON parsing, mediator
+  dispatch, repository calls, or handler execution as something the end user does.
+- If the requested Shipra page/section already exists in verified frontend evidence,
+  explicitly say it already exists instead of describing it as a new feature to build.
+- Exact navigation labels, buttons, fields, and controls require frontend evidence.
+- Backend evidence can support the result of a verified frontend action, but cannot
+  create a UI step by itself.
+- If only part of the workflow is verified, provide only those steps and clearly
+  identify the missing user-facing evidence rather than filling the gap.
+
 If the user explicitly requests a code change AND the detected request type
 is project_change:
 - Explain what existing functionality was verified.
@@ -5391,30 +5406,53 @@ USER QUESTION:
 """
 
     scenario_prompt = f"""
-Write a short practical step-by-step guide in {response_language}.
+Write a concise, professional, genuinely step-by-step Practical Scenario Guide
+in {response_language} for the user's Shipra question.
+
+The guide must read like an ordered workflow a client/user can actually follow:
+first do this, then do this, then do this. Keep only the main actions, but preserve
+their real execution order from MCP-verified frontend evidence.
 
 Rules:
-- Maximum 6 steps.
-- Each step must be 1-2 short sentences.
-- NEVER include code.
-- NEVER include fenced code blocks.
+- Use a numbered list only: 1., 2., 3., ...
+- Prefer 3-6 steps; use fewer when the verified workflow is shorter.
+- Each step must contain ONE main user action, followed by at most one short
+  supporting sentence when needed.
+- Start each step with a clear action verb such as Open, Navigate, Select, Enter,
+  Choose, Click, Review, Confirm, Save, Submit, Sync, Filter, or Search.
+- Put prerequisites/setup before data entry, data entry before submission, and
+  submission before the expected outcome.
+- Do not repeat the same action in multiple steps.
+- Do not turn source-code internals (state initialization, useEffect, mapping,
+  parsing JSON, repository calls, mediator calls, handlers) into user actions.
+- Backend evidence may explain/verify what happens AFTER a user action, but it
+  must never be presented as a screen step unless matching frontend evidence
+  verifies that user action.
+- If the question says "create X section/page" but the sources show that X already
+  exists, say that clearly in the opening step/statement and guide the user through
+  the verified existing workflow. Do not pretend the user must build a new section.
+- If the user truly asks for a new code/project change, do not disguise a proposed
+  implementation as an existing UI workflow.
+- Mention screen/control names only when MCP-verified frontend evidence supports them.
+- If exact navigation/menu/button text is not verified, use a truthful neutral action
+  such as "Open the existing Draft Orders view" rather than inventing menu clicks.
+- You MAY add a short file reference at the end of a step when it materially supports
+  that step, formatted exactly as:
+  Reference: <verified frontend file path>
+- NEVER include code or fenced code blocks.
 - NEVER include Function/Class labels.
-- You MAY mention only a short file reference when useful, like:
-  Reference: Shipra.Frontend/src/pages/orders/createRegularOrder/index.js
-- Do not explain source code here.
+- Do not explain source code in this guide.
 - Do not dump file contents.
-- Focus only on what the user should do.
-- Mention only controls/actions actually supported by MCP-verified frontend source.
 - Do not derive UI steps from backend-only evidence.
-- The requested entity and requested operation must both match the verified frontend code.
-- If the existing screen controls were not verified, say that instead of inventing steps.
-- If verification scope is PARTIAL_ENTITY_ONLY, do not write a normal step-by-step
-  workflow for the requested action. Instead summarize what existing feature/page
-  was verified and identify the missing action evidence.
-- End with one short Expected Result line.
+- The requested entity AND requested operation must match the verified evidence.
+- If verification scope is PARTIAL_ENTITY_ONLY, do not invent a complete workflow.
+  State what part is verified, then identify exactly what user-facing action is not
+  verified.
+- End with exactly one short line beginning with "Expected Result:".
+- Keep the guide concise and practical; accuracy is more important than adding steps.
 
-Use project sources only to make the steps accurate.
-If something is not verified in the sources, clearly say so.
+Use only the supplied verified project sources for Shipra-specific facts.
+If a step is not supported by those sources, omit it or state the evidence gap.
 
 Sources:
 {context}
