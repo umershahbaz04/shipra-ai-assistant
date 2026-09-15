@@ -4969,7 +4969,7 @@ def build_order_count_answer(status_result, response_language):
 
 
 def build_verified_mcp_fallback_answer(question, mcp_results):
-    """Render MCP-verified evidence professionally when Gemini is unavailable."""
+    """Build a question-specific fallback from verified MCP evidence only."""
     response_language = get_response_language(question)
     results = list(mcp_results or [])
 
@@ -4977,53 +4977,157 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
         if response_language == "Roman Urdu":
             return (
                 "### Practical Scenario Guide\n"
-                "Verified MCP evidence available nahi hai, is liye exact steps invent nahi kiye ja rahe.\n\n"
-                "**Expected Result:** Verified source milne par exact workflow bataya jayega.\n\n"
+                "Verified frontend workflow evidence available nahi hai, is liye exact UI steps invent nahi kiye ja rahe.\n\n"
+                "**Expected Result:** Relevant verified source milne par exact workflow diya jayega.\n\n"
                 "### Actual Project Code Flow\n"
-                "MCP se verified source evidence retrieve nahi hua."
+                "MCP se relevant verified project evidence retrieve nahi hua."
             )
         return (
             "### Practical Scenario Guide\n"
-            "Verified MCP evidence is unavailable, so exact steps are not being invented.\n\n"
-            "**Expected Result:** The exact workflow can be provided when verified source evidence is available.\n\n"
+            "Verified frontend workflow evidence is unavailable, so exact UI steps are not being invented.\n\n"
+            "**Expected Result:** The exact workflow can be provided when relevant verified evidence is available.\n\n"
             "### Actual Project Code Flow\n"
-            "No verified MCP source evidence was retrieved."
+            "No relevant verified MCP project evidence was retrieved."
         )
 
+    q = (question or "").lower()
+    combined = "\n".join(
+        f"{r.get('file_path','')}\n{r.get('symbol','')}\n{r.get('text','')}"
+        for r in results
+    )
+    low = combined.lower()
+
+    # Evidence-derived workflow facts. These are intentionally conservative:
+    # a step is added only when the retrieved source text supports it.
+    steps = []
+    expected = None
+
+    def has(*terms):
+        return any(term.lower() in low for term in terms)
+
+    # ---- Return orders ----
+    if ("return" in q and "order" in q) or has("createreturnordercommand", "returnorderpage"):
+        if has("pages/orders/returnorders", "returnorderpage"):
+            steps.append("Open Shipra's **Orders → Return Orders** section.")
+        if has("returnorderlist", "openreturnordermodal"):
+            steps.append("Locate the order you want to return and open its **Return Order** workflow/modal.")
+        elif has("getorderbyid", "request.orderid"):
+            steps.append("Select the existing order for which the return needs to be created.")
+        if has("getallclientreturnreasonforselection", "clientreturnreasonid"):
+            steps.append("Select the applicable **return reason** from the available return reasons.")
+        if has("returncomment"):
+            steps.append("Enter the required return comment/details.")
+        if has("request.file", "uploadfileasync"):
+            steps.append("Attach the return file/document if it is required for this return.")
+        if has("returnproducts", "createreturnproduct"):
+            steps.append("For a fulfillable order, select/provide the products being returned where applicable.")
+        if has("createreturn(", "createreturnordercommand"):
+            steps.append("Submit the return request to create the return order.")
+        if has("returntrackinghistory", "enumreturnstatus.created"):
+            steps.append("After submission, verify that the return is created and appears in the return workflow/status tracking.")
+        expected = "A return record is created against the selected eligible order and enters the return tracking workflow."
+
+    # ---- Payment links ----
+    elif "payment link" in q or has("generatepaymentlink", "paymentlink/index.js"):
+        if has("pages/orders/paymentlink"):
+            steps.append("Open Shipra's **Orders → Payment Links** section.")
+        if has("getorderbyorderno", "request.orderno"):
+            steps.append("Locate/select the existing order for which you want to generate a payment link.")
+        validations = []
+        if has("enumpaymentmethod.pp", "prepaid orders"):
+            validations.append("the order is not prepaid")
+        if has("amount > 5000", "cannot exceed 5000"):
+            validations.append("the amount does not exceed 5000")
+        if has("amount.getvalueordefault() == 0", "zero amount"):
+            validations.append("the amount is greater than 0")
+        if validations:
+            steps.append("Before generating the link, confirm that " + ", ".join(validations) + ".")
+        if has("getpaymentlinkbyorderid"):
+            steps.append("Make sure a payment link does not already exist for that order.")
+        if has("generatepaymentlink", "paymentlink"):
+            steps.append("Use the available payment-link generation action and submit the request.")
+        steps.append("After success, verify the generated payment link in the Payment Links workflow.")
+        expected = "A unique payment link is generated for the eligible order."
+
+    # ---- Draft orders ----
+    elif "draft" in q and "order" in q:
+        if has("pages/orders/draftorders"):
+            steps.append("Open Shipra's **Draft Orders** section under Orders.")
+        if has("getallorderdrafts"):
+            steps.append("Review the existing draft orders and locate the draft you want to work with.")
+        if has("getorderdraftbydraftid", "handleeditorderdraft"):
+            steps.append("Open the selected draft for editing when you need to continue an existing draft.")
+        if has("createorderdraftcommand", "orderdraftid"):
+            steps.append("Enter or update the required order information and save/submit it as a draft.")
+        if has("createorderdraft", "updateorderdraft"):
+            steps.append("Verify that the draft is created or the existing draft is updated in the Draft Orders list.")
+        expected = "The order is saved as a new draft or the selected draft is updated."
+
+    # ---- Inventory ----
+    elif "inventory" in q:
+        if has("inventorysale", "product inventory"):
+            steps.append("Open the relevant **Product Inventory** screen in Shipra.")
+        if has("editinventorymodal", "updateproductstockquantitybyreason"):
+            steps.append("Select the inventory item whose stock quantity you want to update and open the inventory edit action.")
+            if has('name: "reason"', "transactiontypeid"):
+                steps.append("Select the applicable stock adjustment reason.")
+            if has('name: "quantity"', "quantity: parsefloat"):
+                steps.append("Enter the quantity to adjust and add a comment if required.")
+            steps.append("Submit the stock update and verify the refreshed inventory quantity.")
+        if has("syncinventorymodal", "salechannelinventorysync"):
+            steps.append("If inventory synchronization is required, choose the sale channel/configuration and run the inventory sync.")
+        expected = "The selected inventory operation is completed and the inventory view is refreshed with the verified result."
+
+    # Generic evidence-based fallback: do NOT pretend generic actions are exact.
+    if not steps:
+        frontend = [
+            r for r in results
+            if "frontend" in str(r.get("file_path", "")).lower()
+        ]
+        if frontend:
+            first_path = str(frontend[0].get("file_path") or "")
+            page_name = Path(first_path).parent.name or "relevant"
+            steps.append(
+                f"Open the Shipra frontend area related to **{page_name}** shown by the verified source evidence."
+            )
+            steps.append(
+                "Follow only the fields/actions visible in the verified frontend implementation below; the retrieved evidence does not verify enough UI detail to name additional steps safely."
+            )
+        else:
+            steps.append(
+                "The retrieved evidence verifies backend behavior but does not verify the user-facing screen/navigation, so exact UI steps cannot be stated safely."
+            )
+        expected = "The requested operation follows the verified project behavior shown in the code flow below."
+
+    # Remove duplicate steps while preserving order.
+    unique_steps = []
+    seen = set()
+    for step in steps:
+        key = step.strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            unique_steps.append(step)
+
+    parts = ["### Practical Scenario Guide"]
+    for i, step in enumerate(unique_steps, 1):
+        parts.append(f"{i}. {step}")
+    parts.extend(["", f"**Expected Result:** {expected}", "", "### Actual Project Code Flow"])
+
     if response_language == "Roman Urdu":
-        parts = [
-            "### Practical Scenario Guide",
-            "1. Neeche diye gaye MCP-verified frontend evidence ke mutabiq relevant Shipra screen open karein.",
-            "2. Us screen par requested workflow se related record/item ko locate ya select karein.",
-            "3. Sirf woh fields/options fill ya select karein jo retrieved frontend evidence mein verify hain.",
-            "4. Retrieved frontend evidence mein verified submit/save/create/update action perform karein.",
-            "5. Success state ya updated result ko screen par verify karein; exact UI control verify na ho to uska naam invent na karein.",
-            "",
-            "**Expected Result:** Requested workflow verified project evidence ke mutabiq complete hoga.",
-            "",
-            "### Actual Project Code Flow",
-            "Gemini response available nahi tha, is liye neeche sirf MCP-verified project code dikhaya gaya hai.",
-        ]
+        parts.append(
+            "Gemini response available nahi tha, is liye guide aur code flow sirf MCP-verified project evidence se banaye gaye hain."
+        )
         explanation_heading = "**Is code mein kya ho raha hai:**"
+        explanation = "Yeh requested workflow se match karta hua exact MCP-verified source excerpt hai."
     else:
-        parts = [
-            "### Practical Scenario Guide",
-            "1. Open the relevant Shipra screen identified by the MCP-verified frontend evidence below.",
-            "2. Locate or select the record/item involved in the requested workflow.",
-            "3. Fill or select only the fields/options verified by the retrieved frontend evidence.",
-            "4. Perform the submit/save/create/update action verified by the frontend evidence.",
-            "5. Verify the success state or updated result on screen; do not assume an unverified control name.",
-            "",
-            "**Expected Result:** The requested workflow is completed according to verified project evidence.",
-            "",
-            "### Actual Project Code Flow",
-            "Gemini response was unavailable, so only MCP-verified project code is shown below.",
-        ]
+        parts.append(
+            "Gemini response was unavailable, so this guide and code flow were built only from MCP-verified project evidence."
+        )
         explanation_heading = "**What this code shows:**"
+        explanation = "This is an exact MCP-verified source excerpt matched to the requested workflow."
 
     shown = 0
     for result in results:
-        # Do not dump generic documentation/mock chunks as giant code blocks.
         if result.get("source_type") != "actual_code":
             continue
 
@@ -5035,14 +5139,34 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
         symbol = str(result.get("symbol") or "Not detected")
         language = code_language(path)
 
-        # Keep fallback readable. Exact snippet extraction remains the source of truth.
         if len(snippet) > 2600:
             snippet = snippet[:2600].rstrip() + "\n// ..."
+
+        # Meaningful source headings instead of "Verified Source 1".
+        p = path.lower()
+        if "returnorders/list" in p:
+            heading = "Return Order List & User Actions"
+        elif "returnorders" in p and "frontend" in p:
+            heading = "Return Orders Frontend"
+        elif "createreturnorder" in p:
+            heading = "Return Order Creation Backend"
+        elif "paymentlink" in p and "frontend" in p:
+            heading = "Payment Link Frontend"
+        elif "generatepaymentlink" in p:
+            heading = "Payment Link Generation Backend"
+        elif "draftorders" in p and "frontend" in p:
+            heading = "Draft Orders Frontend"
+        elif "createorderdraft" in p:
+            heading = "Draft Order Creation Backend"
+        elif "inventory" in p and "frontend" in p:
+            heading = "Inventory Frontend"
+        else:
+            heading = Path(path).name or f"Verified Project Source {shown + 1}"
 
         shown += 1
         parts.extend([
             "",
-            f"#### Verified Source {shown}",
+            f"#### {heading}",
             f"**File:** `{path}`",
             f"**Function/Class:** `{symbol}`",
             "",
@@ -5051,27 +5175,16 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
             "```",
             "",
             explanation_heading,
-            (
-                "Yeh exact MCP-verified source excerpt hai jo requested feature se match karta hai."
-                if response_language == "Roman Urdu"
-                else
-                "This is the exact MCP-verified source excerpt matched to the requested feature."
-            ),
+            explanation,
         ])
 
-        # Avoid an unreadable wall of code in the fallback response.
         if shown >= 4:
             break
 
     if shown == 0:
         parts.extend([
             "",
-            (
-                "Relevant executable source snippet verify nahi hua; is liye raw unrelated code dump nahi kiya gaya."
-                if response_language == "Roman Urdu"
-                else
-                "No relevant executable source snippet was verified, so unrelated raw code was not dumped."
-            ),
+            "No relevant executable source snippet was verified, so unrelated raw code was not displayed."
         ])
 
     return "\n".join(parts)
