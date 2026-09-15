@@ -562,6 +562,63 @@ def search_mock_orders(
     }
 
 
+
+def _normalize_mock_status(value) -> str:
+    """Canonical comparison form for order statuses without changing meaning."""
+    text = str(value or "").strip().casefold().replace("_", " ").replace("-", " ")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _mock_order_status(order: dict) -> str:
+    """Read status from all known Shipra/mock-data status field shapes."""
+    for name in (
+        "orderStatus", "status", "Status", "OrderStatus", "order_status",
+        "orderStatusName", "OrderStatusName", "trackingStatus",
+        "trackingStatusName", "carrierTrackingStatus", "carrierTrackingStatusName",
+    ):
+        value = order.get(name)
+        if value in (None, ""):
+            continue
+        if isinstance(value, dict):
+            for key in ("name", "text", "value", "statusName", "label"):
+                nested = value.get(key)
+                if nested not in (None, ""):
+                    return str(nested)
+            continue
+        return str(value)
+    return ""
+
+
+@mcp.tool()
+def get_orders_by_status(status: str) -> dict:
+    """Return exact mock orders for any status using one global normalization path."""
+    wanted = _normalize_mock_status(status)
+    if not wanted:
+        return {"status": "error", "message": "Order status is required."}
+
+    orders, path = _load_mock_orders()
+    if orders is None:
+        return {
+            "status": "error",
+            "message": "mock-data/orders.json was not found or could not be read.",
+            "resolved_path": path,
+        }
+
+    matches = [
+        order for order in orders
+        if _normalize_mock_status(_mock_order_status(order)) == wanted
+    ]
+    return {
+        "status": "ok",
+        "file_path": "mock-data/orders.json",
+        "resolved_path": path,
+        "requested_status": status,
+        "normalized_status": wanted,
+        "total_records_checked": len(orders),
+        "count": len(matches),
+        "orders": matches,
+    }
+
 def _symbol_pattern(symbol_name: str) -> re.Pattern:
     return re.compile(rf"\b{re.escape(symbol_name)}\b", re.IGNORECASE)
 
