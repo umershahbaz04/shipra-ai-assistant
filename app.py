@@ -15,6 +15,7 @@ from collections import Counter, defaultdict
 import faiss
 import streamlit as st
 from google import genai
+from google.genai import types
 from sentence_transformers import SentenceTransformer
 from supabase import create_client, Client as SupabaseClient
 
@@ -5536,179 +5537,110 @@ Question:
 
     last_error = None
 
+    # FAST PATH:
+    # One generation request per model. The same response must contain both the
+    # Practical Scenario Guide and Actual Project Code Flow. This avoids the old
+    # second scenario-generation request and long retry/sleep loops.
     for model_name in models_to_try:
-        for attempt in range(1, 4):
-            try:
-                start = time.time()
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                )
-                elapsed = time.time() - start
-                print(f"Gemini response time: {elapsed:.2f} seconds")
-                answer_text = (response.text or "").strip()
+        try:
+            start = time.time()
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    thinking_config=types.ThinkingConfig(
+                        thinking_level="low",
+                    ),
+                ),
+            )
+            elapsed = time.time() - start
+            print(f"Gemini response time: {elapsed:.2f} seconds")
+            answer_text = (response.text or "").strip()
 
+            if not answer_text:
+                raise ValueError("Gemini returned an empty response.")
 
-                if needs_language_retry(
-                    answer_text,
-                    response_language,
-                ):
-                    correction_prompt = prompt + f"""
-
-LANGUAGE CORRECTION REQUIRED
-Your previous draft used the wrong answer language. Rewrite the complete
-answer now. Keep the two required Markdown headings exactly unchanged, but
-write every user-facing sentence below them in {response_language} only.
-Do not change, add, or remove any project facts or code placeholders.
-"""
-                    corrected_response = client.models.generate_content(
-                        model=model_name,
-                        contents=correction_prompt,
-                    )
-                    answer_text = (corrected_response.text or "").strip()
-                    if needs_language_retry(answer_text, response_language):
-                        raise ValueError(
-                            "Model did not satisfy the required response language."
-                        )
-
-                if (
-                    intent == PROJECT_CHANGE
-                    and proposed_implementation_is_incomplete(answer_text)
-                ):
-                    implementation_retry_prompt = prompt + """
-
-IMPLEMENTATION QUALITY CORRECTION REQUIRED
-The proposed implementation contains a TODO, placeholder, pass statement, or
-non-working stub. Rewrite the complete answer with a working implementation for
-the requested behavior. Keep verified project facts unchanged. For unknown page
-state/data names, make the helper accept data as an argument and label the call
-site assumption instead of inventing a project variable.
-"""
-                    corrected_response = client.models.generate_content(
-                        model=model_name,
-                        contents=implementation_retry_prompt,
-                    )
-                    answer_text = (corrected_response.text or "").strip()
-                    if proposed_implementation_is_incomplete(answer_text):
-                        raise ValueError(
-                            "Model returned an incomplete proposed implementation."
-                        )
-
-                if intent != PROJECT_CHANGE:
-                    answer_text = re.split(
-                        r"(?im)^####\s+Proposed implementation\s*$",
-                        answer_text,
-                        maxsplit=1,
-                    )[0].rstrip()
-
-                answer_text = normalize_answer_headings(answer_text)
-                has_required_sections = (
-                    "### Practical Scenario Guide" in answer_text
-                    and "### Actual Project Code Flow" in answer_text
-                )
-
-                # Always generate the Practical Scenario Guide separately so it
-                # stays a clean user-facing workflow and can never inherit code
-                # snippets or technical explanation from the main answer.
-                scenario_response = client.models.generate_content(
-                    model=model_name,
-                    contents=scenario_prompt,
-                )
-                scenario_text = scenario_response.text.strip()
-
-                if needs_language_retry(
-                    scenario_text,
-                    response_language,
-                ):
-                    scenario_correction_prompt = (
-                        scenario_prompt
-                        + f"""
-
-LANGUAGE CORRECTION REQUIRED
-Rewrite the scenario guide in {response_language} only.
-Keep only numbered user-facing steps and one Expected Result line.
-Do not add headings, code, technical explanation, sources, references, or file paths.
-"""
-                    )
-                    scenario_response = client.models.generate_content(
-                        model=model_name,
-                        contents=scenario_correction_prompt,
-                    )
-                    scenario_text = scenario_response.text.strip()
-                    if needs_language_retry(
-                        scenario_text,
-                        response_language,
-                    ):
-                        raise ValueError(
-                            "Scenario guide did not satisfy the required language."
-                        )
-
-                # Defensive cleanup: even if the model ignores the guide prompt,
-                # code fences and technical source-card labels cannot remain here.
-                scenario_text = re.sub(
-                    r"```[A-Za-z0-9_+-]*\\s*\\n.*?```",
-                    "",
-                    scenario_text,
-                    flags=re.DOTALL,
-                )
-                scenario_text = re.sub(
-                    r"(?mi)^\\s*(?:\\*{0,2})?(?:File|Function/Class|Function|Symbol|Reference):.*$",
-                    "",
-                    scenario_text,
-                )
-                scenario_text = re.sub(r"\\n{3,}", "\\n\\n", scenario_text).strip()
-
-                scenario_marker = "### Practical Scenario Guide"
-                code_marker = "### Actual Project Code Flow"
-
-                # Preserve the already-generated technical/code section exactly as
-                # before; only replace the guide body.
-                if code_marker in answer_text:
-                    code_body = answer_text.split(code_marker, 1)[1].strip()
-                else:
-                    code_body = answer_text
-                    if scenario_marker in code_body:
-                        code_body = code_body.split(scenario_marker, 1)[0].strip()
-                    if not code_body:
-                        code_body = (
-                            "A separate code-flow section was not generated."
-                            if response_language == "English"
-                            else "Alag code-flow section generate nahi hua."
-                        )
-
-                answer_text = (
-                    f"{scenario_marker}\n{scenario_text}\n\n"
-                    f"{code_marker}\n{code_body}"
-                )
-
-                verified_answer = inject_verified_code(
-                    answer_text,
-                    code_cards,
-                    minimum_cards=minimum_code_cards,
-                )
-                return verified_answer, results
-
-            except Exception as error:
-                last_error = error
-                error_text = str(error)
+            # Do not make another model call for language correction. The original
+            # prompt already specifies the required response language.
+            if needs_language_retry(answer_text, response_language):
                 print(
-                    f"Gemini error with {model_name}, "
-                    f"attempt {attempt}: {error}"
+                    f"Language warning from {model_name}; "
+                    "keeping the first response to avoid another slow model call."
                 )
 
-                temporary_error = any(
-                    marker in error_text
-                    for marker in ("503", "UNAVAILABLE", "high demand")
+            if (
+                intent == PROJECT_CHANGE
+                and proposed_implementation_is_incomplete(answer_text)
+            ):
+                print(
+                    f"Implementation quality warning from {model_name}; "
+                    "keeping the verified first response instead of making "
+                    "a second generation request."
                 )
 
-                if temporary_error and attempt < 3:
-                    time.sleep(5 * attempt)
-                    continue
+            if intent != PROJECT_CHANGE:
+                answer_text = re.split(
+                    r"(?im)^####\s+Proposed implementation\s*$",
+                    answer_text,
+                    maxsplit=1,
+                )[0].rstrip()
 
-                break
+            answer_text = normalize_answer_headings(answer_text)
 
-    # All configured models failed. Keep the verified MCP evidence usable
-    # instead of exposing a raw provider 503/high-demand error to the user.
+            scenario_marker = "### Practical Scenario Guide"
+            code_marker = "### Actual Project Code Flow"
+
+            # The main prompt already requires both sections. If the model omits
+            # either heading, fail over once to the fallback model rather than
+            # launching a separate guide-generation call.
+            if (
+                scenario_marker not in answer_text
+                or code_marker not in answer_text
+            ):
+                raise ValueError(
+                    "Gemini response omitted a required answer section."
+                )
+
+            # Keep the guide clean without another LLM call.
+            before_code, code_body = answer_text.split(code_marker, 1)
+            scenario_text = before_code.split(scenario_marker, 1)[1].strip()
+
+            scenario_text = re.sub(
+                r"```[A-Za-z0-9_+-]*\s*\n.*?```",
+                "",
+                scenario_text,
+                flags=re.DOTALL,
+            )
+            scenario_text = re.sub(
+                r"(?mi)^\s*(?:\*{0,2})?"
+                r"(?:File|Function/Class|Function|Symbol|Reference):.*$",
+                "",
+                scenario_text,
+            )
+            scenario_text = re.sub(
+                r"\n{3,}",
+                "\n\n",
+                scenario_text,
+            ).strip()
+
+            answer_text = (
+                f"{scenario_marker}\n{scenario_text}\n\n"
+                f"{code_marker}\n{code_body.strip()}"
+            )
+
+            verified_answer = inject_verified_code(
+                answer_text,
+                code_cards,
+                minimum_cards=minimum_code_cards,
+            )
+            return verified_answer, results
+
+        except Exception as error:
+            last_error = error
+            print(f"Gemini error with {model_name}: {error}")
+            # No sleep and no repeated attempt. Immediately try the one fallback
+            # model, then use the verified MCP fallback below.
+
     print(
         "All project AI models failed; using verified MCP evidence fallback: "
         f"{last_error}"
