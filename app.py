@@ -1137,6 +1137,10 @@ st.markdown(
 
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 client = genai.Client(api_key=GEMINI_API_KEY)
+
+# Gemini model configuration
+PRIMARY_MODEL = "gemini-3.8-flash"
+FALLBACK_MODEL = "gemini-3.6-flash"
 def get_mcp_server_params():
     """
     Build MCP stdio launch parameters without any machine-specific Windows path.
@@ -2873,9 +2877,8 @@ Latest question:
 """
 
     models_to_try = [
-        "gemini-3.5-flash-lite",
-        "gemini-3.6-flash",
-        "gemini-3.7-flash",
+        PRIMARY_MODEL,
+        FALLBACK_MODEL,
     ]
 
     for model_name in models_to_try:
@@ -2977,9 +2980,8 @@ Latest question:
 """
 
     models_to_try = [
-        "gemini-3.5-flash-lite",
-        "gemini-3.6-flash",
-        "gemini-3.7-flash",
+        PRIMARY_MODEL,
+        FALLBACK_MODEL,
     ]
     last_error = None
 
@@ -3791,7 +3793,7 @@ Finish when sufficient verified evidence is collected or the exact search is exh
             try:
                 response = await asyncio.to_thread(
                     client.models.generate_content,
-                    model="gemini-3.5-flash-lite",
+                    model=PRIMARY_MODEL,
                     contents=(
                         instructions
                         + "\nINPUT AND TOOL RESULTS:\n"
@@ -5528,9 +5530,8 @@ Question:
 """
 
     models_to_try = [
-        "gemini-3.5-flash-lite",
-        "gemini-3.6-flash",
-        "gemini-3.7-flash",
+        PRIMARY_MODEL,
+        FALLBACK_MODEL,
     ]
 
     last_error = None
@@ -5793,7 +5794,7 @@ Return ONLY the coding prompt.
 """
 
     response = client.models.generate_content(
-        model="gemini-3.6-flash",
+        model=PRIMARY_MODEL,
         contents=generation_prompt,
     )
 
@@ -5825,7 +5826,7 @@ Return ONLY the corrected final prompt.
 """
 
     validation_response = client.models.generate_content(
-        model="gemini-3.6-flash",
+        model=PRIMARY_MODEL,
         contents=validation_prompt,
     )
 
