@@ -1262,6 +1262,35 @@ with st.sidebar.expander("MCP Debug"):
                 st.success(
                     f"MCP can see {total_files} searchable source files."
                 )
+def parse_json_object(text):
+    """Parse the first JSON object from a model response without requiring a pristine reply."""
+    cleaned = (text or "").strip()
+    cleaned = re.sub(
+        r"^```(?:json)?\s*|\s*```$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    try:
+        value = json.loads(cleaned)
+        if isinstance(value, dict):
+            return value
+    except json.JSONDecodeError:
+        pass
+
+    decoder = json.JSONDecoder()
+    for position, character in enumerate(cleaned):
+        if character != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(cleaned[position:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
+
+    return None
 
         except Exception as health_error:
             import traceback
@@ -2923,35 +2952,7 @@ Latest question:
     raise last_error
 
 
-def parse_json_object(text):
-    """Parse the first JSON object from a model response without requiring a pristine reply."""
-    cleaned = (text or "").strip()
-    cleaned = re.sub(
-        r"^```(?:json)?\s*|\s*```$",
-        "",
-        cleaned,
-        flags=re.IGNORECASE,
-    ).strip()
 
-    try:
-        value = json.loads(cleaned)
-        if isinstance(value, dict):
-            return value
-    except json.JSONDecodeError:
-        pass
-
-    decoder = json.JSONDecoder()
-    for position, character in enumerate(cleaned):
-        if character != "{":
-            continue
-        try:
-            value, _ = decoder.raw_decode(cleaned[position:])
-        except json.JSONDecodeError:
-            continue
-        if isinstance(value, dict):
-            return value
-
-    return None
 
 
 def get_mcp_seed_queries(question, search_results):
