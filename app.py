@@ -5863,51 +5863,68 @@ for conversation in list_conversations():
 
 
 
-def render_message_copy_button(content, key):
-    """Render a compact copy action directly below a chat message."""
+def render_message_copy_button(content, key, align="left"):
+    """Render a compact ChatGPT-style copy action immediately below a message."""
     safe_text = html.escape(str(content or ""), quote=True)
     safe_key = re.sub(r"[^a-zA-Z0-9_-]", "_", str(key))
+    justify = "flex-end" if align == "right" else "flex-start"
 
     st.components.v1.html(
         f"""
-        <div style="height:32px;display:flex;align-items:center;">
+        <div style="
+            height:24px;
+            display:flex;
+            justify-content:{justify};
+            align-items:flex-start;
+            margin-top:-2px;
+            margin-bottom:4px;
+            padding:0;
+        ">
           <button
             id="copy-{safe_key}"
             title="Copy"
             aria-label="Copy message"
-            style="
-              display:inline-flex;align-items:center;gap:6px;padding:4px 8px;
-              border:0;border-radius:7px;background:transparent;color:#9b9b9b;
-              cursor:pointer;font:12px system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-            "
             onclick="copyMessage_{safe_key}()"
+            style="
+              width:28px;
+              height:24px;
+              display:inline-flex;
+              align-items:center;
+              justify-content:center;
+              padding:0;
+              margin:0;
+              border:0;
+              border-radius:6px;
+              background:transparent;
+              color:#9b9b9b;
+              cursor:pointer;
+            "
+            onmouseover="this.style.background='rgba(255,255,255,0.07)';this.style.color='#d6d6d6';"
+            onmouseout="this.style.background='transparent';this.style.color='#9b9b9b';"
           >
-            <span style="font-size:15px;line-height:1;">⧉</span>
-            <span id="copy-label-{safe_key}">Copy</span>
+            <span id="copy-icon-{safe_key}" style="font-size:16px;line-height:1;">⧉</span>
           </button>
         </div>
         <textarea id="copy-text-{safe_key}" style="display:none;">{safe_text}</textarea>
         <script>
           async function copyMessage_{safe_key}() {{
             const text = document.getElementById("copy-text-{safe_key}").value;
-            const label = document.getElementById("copy-label-{safe_key}");
+            const icon = document.getElementById("copy-icon-{safe_key}");
             try {{
               await navigator.clipboard.writeText(text);
-              label.textContent = "Copied";
-              setTimeout(() => label.textContent = "Copy", 1200);
             }} catch (err) {{
               const area = document.getElementById("copy-text-{safe_key}");
               area.style.display = "block";
               area.select();
               document.execCommand("copy");
               area.style.display = "none";
-              label.textContent = "Copied";
-              setTimeout(() => label.textContent = "Copy", 1200);
             }}
+            icon.textContent = "✓";
+            setTimeout(() => icon.textContent = "⧉", 1200);
           }}
         </script>
         """,
-        height=32,
+        height=28,
     )
 
 
@@ -5931,6 +5948,7 @@ for message_index, message in enumerate(st.session_state["chat_history"]):
         render_message_copy_button(
             message["content"],
             f"history_user_{message_index}",
+            align="right",
         )
     else:
         with st.chat_message(
@@ -5978,6 +5996,7 @@ if question:
     render_message_copy_button(
         question,
         "live_user_message",
+        align="right",
     )
 
     with st.chat_message(
