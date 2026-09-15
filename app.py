@@ -4618,55 +4618,140 @@ def detect_order_count_status(question):
 
 
 async def get_verified_order_status_count(status_key):
-    """Read deterministic order counts from the MCP data tool, not source-code search."""
+    """Return exact matching mock orders for a status via MCP structured data."""
+    status_labels = {
+        "delivered": "Delivered",
+        "pending": "Pending",
+        "queued": "Queued",
+        "on_the_way": "On The Way",
+    }
+    wanted_status = status_labels.get(status_key)
+    if not wanted_status:
+        return None
+
     params = get_mcp_server_params()
     async with asyncio.timeout(30):
         async with Client(params) as mcp_client:
+            # search_mock_orders reads project-source/mock-data/orders.json and
+            # returns the matching records themselves, so the count and the
+            # customer/order details come from the same verified dataset.
             result = await mcp_client.call_tool(
-                "get_order_status_summary",
+                "search_mock_orders",
                 {
-                    "date_from": None,
-                    "date_to": None,
-                    "store_id": None,
-                    "carrier_id": None,
+                    "labels": None,
+                    "payment_method": None,
+                    "status": wanted_status,
+                    "exclude_status": None,
+                    "carrier": None,
                 },
             )
 
-    if result.is_error:
+    if getattr(result, "is_error", False):
         return None
 
-    payload = result.structured_content
-    if not isinstance(payload, dict):
-        raw = "\n".join(
-            block.text
-            for block in result.content
-            if getattr(block, "type", "") == "text"
-        )
-        payload = parse_json_object(raw)
+    payload = _extract_mcp_payload(result)
+
+    # Some MCP SDK/server combinations wrap a tool's dictionary under one
+    # extra result/data/content key. Unwrap only deterministic dict wrappers.
+    for _ in range(4):
+        if not isinstance(payload, dict):
+            break
+        if payload.get("status") == "ok" or "orders" in payload:
+            break
+        unwrapped = None
+        for key in ("result", "data", "content", "value"):
+            candidate = payload.get(key)
+            if isinstance(candidate, dict):
+                unwrapped = candidate
+                break
+        if unwrapped is None:
+            break
+        payload = unwrapped
 
     if not isinstance(payload, dict) or payload.get("status") != "ok":
         return None
 
-    counts = payload.get("counts") or {}
-    if status_key not in counts:
+    orders = payload.get("orders") or payload.get("matches") or []
+    if isinstance(orders, dict):
+        orders = [orders]
+    if not isinstance(orders, list):
         return None
-
-    try:
-        count = int(counts[status_key])
-    except (TypeError, ValueError):
-        return None
+    orders = [item for item in orders if isinstance(item, dict)]
 
     return {
-        "count": count,
+        "count": len(orders),
         "status_key": status_key,
-        "total_orders": payload.get("total_orders"),
-        "data_source": payload.get("data_source", "mock"),
-        "filters": payload.get("filters") or {},
+        "orders": orders,
+        "data_source": "mock",
+        "file_path": payload.get("file_path", "mock-data/orders.json"),
     }
 
 
+def _first_order_value(record, *names):
+    """Pick the first non-empty value across common mock-order field aliases."""
+    for name in names:
+        value = record.get(name)
+        if value is None or value == "":
+            continue
+        if isinstance(value, dict):
+            for nested_key in ("name", "text", "value", "carrierName", "storeName"):
+                nested = value.get(nested_key)
+                if nested not in (None, ""):
+                    return str(nested)
+            continue
+        return str(value)
+    return None
+
+
+def _format_order_person_details(record):
+    """Format only fields actually present in the verified mock order record."""
+    order_no = _first_order_value(record, "orderNo", "order_no", "OrderNo") or "Unknown"
+    customer = _first_order_value(
+        record, "customerName", "customer_name", "CustomerName", "receiverName", "name"
+    )
+    status = _first_order_value(record, "orderStatus", "status", "Status")
+    phone = _first_order_value(
+        record, "customerPhone", "phone", "phoneNumber", "mobile", "contactNo", "CustomerPhone"
+    )
+    email = _first_order_value(record, "customerEmail", "email", "Email")
+    address = _first_order_value(
+        record, "address", "deliveryAddress", "shippingAddress", "customerAddress", "Address"
+    )
+    city = _first_order_value(record, "city", "City", "cityName")
+    store = _first_order_value(record, "storeName", "store", "StoreName")
+    carrier = _first_order_value(record, "carrierName", "carrier", "CarrierName", "Carrier")
+    tracking = _first_order_value(record, "trackingNo", "trackingNumber", "tracking", "TrackingNo")
+    amount = _first_order_value(record, "amount", "Amount", "codAmount", "totalAmount", "orderAmount")
+    payment = _first_order_value(record, "paymentMethod", "payment_method", "PaymentMethod")
+
+    parts = [f"**{order_no}**"]
+    if customer:
+        parts.append(f"Customer: {customer}")
+    if status:
+        parts.append(f"Status: {status}")
+    if phone:
+        parts.append(f"Phone: {phone}")
+    if email:
+        parts.append(f"Email: {email}")
+    if address:
+        parts.append(f"Address: {address}")
+    if city:
+        parts.append(f"City: {city}")
+    if store:
+        parts.append(f"Store: {store}")
+    if carrier:
+        parts.append(f"Carrier: {carrier}")
+    if tracking:
+        parts.append(f"Tracking: {tracking}")
+    if amount:
+        parts.append(f"Amount: {amount}")
+    if payment:
+        parts.append(f"Payment: {payment}")
+    return " — ".join(parts)
+
+
 def build_order_count_answer(status_result, response_language):
-    """Return a concise direct answer for verified order-status count questions."""
+    """Return exact status count plus the matching customers/orders from MCP data."""
     labels = {
         "delivered": "delivered",
         "pending": "pending",
@@ -4675,20 +4760,32 @@ def build_order_count_answer(status_result, response_language):
     }
     key = status_result["status_key"]
     label = labels.get(key, key.replace("_", " "))
-    count = status_result["count"]
+    orders = status_result.get("orders") or []
+    count = len(orders)
+    detail_lines = [_format_order_person_details(record) for record in orders]
 
     if response_language == "Roman Urdu":
+        heading = f"**{count} orders {label} hain.**"
+        if detail_lines:
+            details = "\n\n".join(f"- {line}" for line in detail_lines)
+            return (
+                f"{heading}\n\n{details}\n\n"
+                "Ye count aur details verified MCP mock order records se directly li gayi hain; "
+                "source-code/RAG snippets se infer nahi ki gayi."
+            )
         return (
-            f"**{count} orders {label} hain.**\n\n"
-            "Ye count verified MCP mock order data se directly calculate hua hai; "
-            "source-code/RAG snippets se infer nahi kiya gaya."
+            f"{heading}\n\nVerified MCP mock data mein is status ka koi matching order record nahi mila."
         )
 
-    return (
-        f"**{count} orders are {label}.**\n\n"
-        "This count comes directly from the verified MCP mock order data; "
-        "it was not inferred from source-code/RAG snippets."
-    )
+    heading = f"**{count} orders are {label}.**"
+    if detail_lines:
+        details = "\n\n".join(f"- {line}" for line in detail_lines)
+        return (
+            f"{heading}\n\n{details}\n\n"
+            "The count and details come directly from verified MCP mock order records; "
+            "they were not inferred from source-code/RAG snippets."
+        )
+    return f"{heading}\n\nNo matching order records were found in the verified MCP mock data."
 
 
 def ask_shipra_project_ai(question, intent):
