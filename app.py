@@ -3298,161 +3298,6 @@ def prune_mcp_evidence(evidence, question, seed_queries):
     return output[:12]
 
 
-
-def get_request_semantic_contract(question):
-    """Extract the user's required operation and distinctive entity concepts."""
-    profile = detect_request_profile(question)
-    lowered = str(question or "").lower()
-
-    action = profile.get("action")
-    action_terms = {
-        "create": {"create", "created", "creating", "add", "new", "generate", "save", "submit"},
-        "assign": {"assign", "assigned", "apply", "allocation", "allocate"},
-        "connect": {"connect", "connected", "connection", "link", "activate"},
-        "update": {"update", "updated", "edit", "change", "modify"},
-        "delete": {"delete", "deleted", "remove", "removed"},
-        "filter": {"filter", "search", "find"},
-        "list": {"list", "getall", "fetch", "show"},
-        "export": {"export", "csv", "excel", "download"},
-        "import": {"import", "upload"},
-        "sync": {"sync", "synchronize", "synchronise"},
-        "return": {"return", "returned"},
-        "track": {"track", "tracking"},
-        "validate": {"validate", "validation", "validator"},
-        "calculate": {"calculate", "calculator", "rate"},
-        "view": {"view", "details", "get", "fetch", "open"},
-    }
-
-    # Distinctive business nouns must survive retrieval. This prevents:
-    # "sale channel orders" -> "sale channel config" drift, and applies to
-    # other compound feature questions as well.
-    stop = {
-        "how", "what", "when", "where", "which", "who", "why",
-        "create", "add", "make", "update", "edit", "change", "delete",
-        "remove", "assign", "connect", "filter", "search", "find",
-        "list", "show", "export", "download", "import", "upload",
-        "sync", "track", "validate", "view", "open", "generate",
-        "shipra", "section", "page", "screen", "feature", "flow",
-        "the", "a", "an", "to", "of", "for", "in", "on", "with",
-        "is", "are", "do", "does", "can", "me", "my", "please",
-        "kesy", "kaise", "banao", "banana", "batao", "btao", "kro",
-        "karna", "hai", "hain", "ka", "ki", "ke", "ko", "mai",
-        "main", "mein", "sy", "se", "mjhy", "mujhe",
-    }
-    nouns = [
-        token for token in tokenize(lowered)
-        if token not in stop and len(token) >= 3
-    ]
-
-    # Preserve canonical compound entity words too.
-    entity = str(profile.get("entity") or "")
-    for token in tokenize(entity):
-        if token not in stop and token not in nouns:
-            nouns.append(token)
-
-    return {
-        "action": action,
-        "action_terms": action_terms.get(action, set()),
-        "concepts": nouns[:6],
-    }
-
-
-def evidence_matches_request(item, question):
-    """Reject neighboring features that do not match the requested entity+operation."""
-    if item.get("source_type") == "mock_data":
-        return True
-
-    contract = get_request_semantic_contract(question)
-    concepts = contract["concepts"]
-    action = contract["action"]
-    action_terms = contract["action_terms"]
-
-    searchable = " ".join([
-        str(item.get("file_path") or ""),
-        str(item.get("symbol") or ""),
-        str(item.get("section") or ""),
-        str(item.get("text") or ""),
-    ]).lower()
-    source_tokens = tokenize(searchable)
-
-    # Require strong coverage of distinctive concepts.
-    # For 1 concept require it; for 2+ concepts require all but at most one,
-    # while especially preserving "order/orders" when explicitly requested.
-    if concepts:
-        matched = {c for c in concepts if c in source_tokens or c in searchable}
-        required = 1 if len(concepts) == 1 else max(2, len(set(concepts)) - 1)
-
-        if len(matched) < required:
-            return False
-
-        if re.search(r"\borders?\b", str(question or "").lower()):
-            if "order" not in source_tokens and "orders" not in source_tokens and "order" not in searchable:
-                return False
-
-    # Universal operation guard. Do not let a clearly different CRUD operation
-    # satisfy the request merely because the entity name matches.
-    operation_markers = {
-        "create": ("create", "add", "generate", "save", "submit", "post"),
-        "update": ("update", "edit", "modify", "patch", "put"),
-        "delete": ("delete", "remove"),
-        "assign": ("assign", "apply", "allocate"),
-        "connect": ("connect", "connection", "activate", "link"),
-        "sync": ("sync", "synchron"),
-        "export": ("export", "csv", "excel", "download"),
-        "import": ("import", "upload"),
-        "filter": ("filter", "search"),
-        "track": ("track", "tracking"),
-        "validate": ("validat",),
-    }
-
-    if action in operation_markers:
-        requested_markers = operation_markers[action]
-        has_requested_action = any(marker in searchable for marker in requested_markers)
-
-        # Frontend page evidence can support navigation even if the action word
-        # is not in the filename, but config/handler evidence must match action.
-        path = str(item.get("file_path") or "").lower()
-        is_frontend_page = "shipra.frontend/" in path and (
-            "/pages/" in path or "/components/" in path
-        )
-        if not has_requested_action and not is_frontend_page:
-            return False
-
-        conflicting = {
-            "create": ("update", "delete", "remove"),
-            "update": ("create", "delete", "remove"),
-            "delete": ("create", "update"),
-        }.get(action, ())
-        if conflicting and any(word in searchable for word in conflicting) and not has_requested_action:
-            return False
-
-    return True
-
-
-def enforce_request_evidence_contract(results, question):
-    """Apply the entity+operation contract to all retrieved evidence."""
-    kept = [
-        item for item in (results or [])
-        if evidence_matches_request(item, question)
-    ]
-
-    # Stable de-duplication.
-    output = []
-    seen = set()
-    for item in kept:
-        key = (
-            item.get("file_path"),
-            item.get("start_line"),
-            item.get("end_line"),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        output.append(item)
-
-    return output[:12]
-
-
 def proposed_implementation_is_incomplete(answer):
     """Reject placeholder-only proposed implementations before display."""
     marker = "#### Proposed implementation"
@@ -3528,15 +3373,6 @@ GLOBAL VERIFICATION RULES:
 - Indexed/RAG results are discovery hints only and never proof by themselves.
 - Never treat semantic similarity, a shared noun, or a similar filename as proof.
 - The requested entity AND requested operation must both match the verified code.
-- For compound requests, preserve every distinctive business concept from the
-  question. Example: "sale channel orders" requires evidence about orders in the
-  sale-channel workflow; SaleChannelConfig alone is not a match.
-- Configuration, settings, credentials, validators, and connection setup are
-  supporting evidence only when the requested workflow actually concerns them.
-- Before finishing, explicitly check: (1) entity match, (2) operation match,
-  (3) frontend evidence for UI questions. If any check fails, search again with
-  the missing concept instead of returning a neighboring feature.
-
 - Store and Store Channel are different entities.
 - Creating, assigning, updating, filtering, validating, syncing, uploading,
   exporting, returning, and deleting are different operations unless the code
@@ -5132,19 +4968,6 @@ def build_order_count_answer(status_result, response_language):
     return f"{heading}\n\nNo matching order records were found in the verified MCP mock data."
 
 
-
-def clean_assistant_display_text(answer):
-    """Remove internal/rendering artifacts without changing answer content."""
-    cleaned = str(answer or "")
-    cleaned = re.sub(
-        r"(?mi)^\s*(?:`{1,3})?st\.iframe(?:\([^\n]*\))?(?:`{1,3})?\s*$\n?",
-        "",
-        cleaned,
-    )
-    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-    return cleaned.strip()
-
-
 def build_verified_mcp_fallback_answer(question, mcp_results):
     """Build a question-specific fallback from verified MCP evidence only."""
     response_language = get_response_language(question)
@@ -5274,7 +5097,7 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
             steps.append(
                 "The retrieved evidence verifies backend behavior but does not verify the user-facing screen/navigation, so exact UI steps cannot be stated safely."
             )
-        expected = "The requested operation is described only where the retrieved evidence matches both the requested feature and action."
+        expected = "The requested operation follows the verified project behavior shown in the code flow below."
 
     # Remove duplicate steps while preserving order.
     unique_steps = []
@@ -5292,13 +5115,13 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
 
     if response_language == "Roman Urdu":
         parts.append(
-            "Neeche guide aur code flow verified MCP project evidence par based hain."
+            "Gemini response available nahi tha, is liye guide aur code flow sirf MCP-verified project evidence se banaye gaye hain."
         )
         explanation_heading = "**Is code mein kya ho raha hai:**"
         explanation = "Yeh requested workflow se match karta hua exact MCP-verified source excerpt hai."
     else:
         parts.append(
-            "The guide and code flow below are based on verified MCP project evidence."
+            "Gemini response was unavailable, so this guide and code flow were built only from MCP-verified project evidence."
         )
         explanation_heading = "**What this code shows:**"
         explanation = "This is an exact MCP-verified source excerpt matched to the requested workflow."
@@ -5316,20 +5139,8 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
         symbol = str(result.get("symbol") or "Not detected")
         language = code_language(path)
 
-        # A batch return-report modal is a different workflow from creating a
-        # normal return order. Keep it only when the user's question asks for
-        # batch/report behavior.
-        path_low = path.lower()
-        question_low = (question or "").lower()
-        if (
-            "batchcreatereturnreport" in path_low
-            and "batch" not in question_low
-            and "report" not in question_low
-        ):
-            continue
-
-        if len(snippet) > 1800:
-            snippet = snippet[:1800].rstrip() + "\n// ..."
+        if len(snippet) > 2600:
+            snippet = snippet[:2600].rstrip() + "\n// ..."
 
         # Meaningful source headings instead of "Verified Source 1".
         p = path.lower()
@@ -5367,7 +5178,7 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
             explanation,
         ])
 
-        if shown >= 3:
+        if shown >= 4:
             break
 
     if shown == 0:
@@ -5505,10 +5316,7 @@ def ask_shipra_project_ai(question, intent):
                 primary_mcp_error = fallback_error
 
     # Final factual evidence is MCP-read evidence only.
-    # Universal semantic contract: the requested entity AND operation must match.
-    # Related configuration/settings code is not accepted as evidence for a
-    # different business operation.
-    results = enforce_request_evidence_contract(mcp_results, question)
+    results = mcp_results
 
     partial_entity_evidence = False
 
@@ -5539,16 +5347,8 @@ def ask_shipra_project_ai(question, intent):
                 entity_results = []
 
             if entity_results:
-                # Entity-only evidence is context only. Re-apply the original
-                # question contract so neighboring operations cannot masquerade
-                # as the requested workflow.
-                compatible_entity_results = enforce_request_evidence_contract(
-                    entity_results,
-                    question,
-                )
-                if compatible_entity_results:
-                    results = compatible_entity_results
-                    partial_entity_evidence = True
+                results = entity_results
+                partial_entity_evidence = True
 
     if results:
         if partial_entity_evidence:
@@ -6014,7 +5814,7 @@ Question:
             code_cards,
             minimum_cards=minimum_code_cards,
         )
-        return clean_assistant_display_text(verified_answer), results
+        return verified_answer, results
 
     except Exception as error:
         elapsed = time.time() - gemini_started
@@ -6023,7 +5823,7 @@ Question:
             f"{type(error).__name__}: {error}"
         )
         print("Using verified MCP fallback immediately.")
-        return clean_assistant_display_text(build_verified_mcp_fallback_answer(question, results)), results
+        return build_verified_mcp_fallback_answer(question, results), results
 
 def generate_project_prompt(question):
     response_language = get_response_language(question)
@@ -6395,7 +6195,7 @@ for message_index, message in enumerate(st.session_state["chat_history"]):
             "assistant",
             avatar=":material/auto_awesome:",
         ):
-            st.markdown(clean_assistant_display_text(message["content"]))
+            st.markdown(message["content"])
             render_message_copy_button(
                 message["content"],
                 f"history_assistant_{message_index}",
@@ -6453,7 +6253,6 @@ if question:
                 )
                 st.stop()
 
-        answer = clean_assistant_display_text(answer)
         st.markdown(answer)
         render_message_copy_button(
             answer,
