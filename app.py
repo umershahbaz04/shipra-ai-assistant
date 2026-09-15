@@ -4993,9 +4993,11 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
     if response_language == "Roman Urdu":
         parts = [
             "### Practical Scenario Guide",
-            "1. Shipra mein requested feature ka verified section/view open karein.",
-            "2. Screen par available verified fields ya controls mein required information enter/select karein.",
-            "3. Verified action ko perform karke workflow complete karein.",
+            "1. Neeche diye gaye MCP-verified frontend evidence ke mutabiq relevant Shipra screen open karein.",
+            "2. Us screen par requested workflow se related record/item ko locate ya select karein.",
+            "3. Sirf woh fields/options fill ya select karein jo retrieved frontend evidence mein verify hain.",
+            "4. Retrieved frontend evidence mein verified submit/save/create/update action perform karein.",
+            "5. Success state ya updated result ko screen par verify karein; exact UI control verify na ho to uska naam invent na karein.",
             "",
             "**Expected Result:** Requested workflow verified project evidence ke mutabiq complete hoga.",
             "",
@@ -5006,9 +5008,11 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
     else:
         parts = [
             "### Practical Scenario Guide",
-            "1. Open the verified Shipra section/view for the requested feature.",
-            "2. Enter or select the required information using the verified fields or controls.",
-            "3. Perform the verified action to complete the workflow.",
+            "1. Open the relevant Shipra screen identified by the MCP-verified frontend evidence below.",
+            "2. Locate or select the record/item involved in the requested workflow.",
+            "3. Fill or select only the fields/options verified by the retrieved frontend evidence.",
+            "4. Perform the submit/save/create/update action verified by the frontend evidence.",
+            "5. Verify the success state or updated result on screen; do not assume an unverified control name.",
             "",
             "**Expected Result:** The requested workflow is completed according to verified project evidence.",
             "",
@@ -5467,35 +5471,35 @@ If existing functionality directly supports the requested operation:
 - Do not create a replacement form, service, or API wrapper unnecessarily.
 
 PRACTICAL GUIDE QUALITY RULES:
-- The Practical Scenario Guide must be an actual chronological Shipra user workflow.
-- Tell the user what to do FIRST, THEN what to do NEXT, and FINALLY what to do.
+- The Practical Scenario Guide is a USER WORKFLOW, not a code summary.
+- Write it exactly in chronological order: FIRST -> NEXT -> THEN -> FINALLY.
 - Use a numbered list only: 1., 2., 3., ...
-- Prefer 3-6 concise steps.
-- Each numbered step must contain one main user-facing action.
-- Start with the relevant Shipra page/section when that navigation is verified.
-- Then describe verified selection/input/filter actions in their real order.
-- Then describe the verified submit/save/generate/update action.
+- Prefer 4-7 short, concrete steps when the evidence supports them.
+- Every step must tell the user one practical action to perform inside Shipra.
+- Step 1 should say which verified Shipra page/section/view to open.
+- The next steps should say what verified item/order/record to find or select.
+- Then explain which verified fields/options/statuses/reasons/filters to enter or choose.
+- Then explain the verified action to perform (for example submit, save, generate,
+  update, sync, create), but use the exact control/button name only when frontend
+  evidence verifies that name.
+- After the action, explain any verified confirmation/result the user should check.
 - End with exactly one short line beginning with "Expected Result:".
-- Do not describe source-code execution as user actions.
-- Do not mention React state, useEffect, JSON parsing, API calls, mediator calls,
-  handlers, repositories, services, or other implementation internals in the guide.
-- Do not include source code, code fences, file paths, "Reference:", Function/Class
-  labels, API names, handler names, repository names, or technical explanations
-  inside the Practical Scenario Guide.
-- Do not invent menus, buttons, fields, navigation, or actions that are not supported
-  by verified frontend evidence.
-- Backend evidence may verify eligibility, validation, or the result after a verified
-  frontend action, but backend-only behavior must not be turned into a fake UI step.
-- If an exact UI control is not verified, describe only the supported action neutrally
-  instead of inventing a control name.
-- If the requested page/section already exists in verified frontend evidence, say so
-  naturally and guide the user through the existing workflow rather than pretending
-  it must be built from scratch.
-- If only part of the user workflow is verified, give only the verified steps and
-  state the missing user-facing evidence briefly; never fill the gap by guessing.
-- Keep ALL file paths, code snippets, functions/classes, APIs, backend logic, source
-  references, evidence gaps, and technical explanation under
-  "### Actual Project Code Flow", after the guide.
+- Make the steps specific to the user's requested Shipra feature. Never use generic
+  filler such as "open the requested feature", "use the verified controls", or
+  "complete the workflow".
+- Use frontend evidence to determine user-facing navigation, fields, controls,
+  modals, tables, and actions.
+- Backend evidence may be used to explain verified eligibility/validation that the
+  user needs to know, but do not turn backend-only implementation into fake UI steps.
+- If frontend evidence proves the screen but not an exact button/control name,
+  describe the action naturally without inventing a name.
+- If a user-facing step is genuinely not verified, say briefly in that step that the
+  exact UI control is not verified; do not guess.
+- Do NOT include source code, code fences, file paths, "Reference:", Function/Class,
+  API names, handler names, repositories, React state, useEffect, mediator calls, or
+  implementation explanation in the guide.
+- Put ALL technical evidence, code, file paths, functions/classes, APIs, backend
+  behavior, and evidence-gap details under "### Actual Project Code Flow".
 
 If the user explicitly requests a code change AND the detected request type
 is project_change:
