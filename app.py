@@ -2712,6 +2712,31 @@ def get_previous_user_question():
     return ""
 
 
+def is_architecture_question(question):
+    """Detect project-structure/development-guidance questions, not end-user workflows."""
+    q = str(question or "").lower()
+
+    architecture_phrases = (
+        "which layers", "what layers", "which layer", "what layer",
+        "kon kon c layers", "kon kon si layers", "kon si layers", "konsi layers",
+        "kin layers", "layers mai", "layers mein", "layers me",
+        "project architecture", "application architecture", "architecture",
+        "project structure", "codebase structure", "folder structure",
+        "frontend backend database", "frontend backend",
+        "where to make changes", "where do i make changes",
+        "kahan kahan change", "kahan changes", "kidhar changes",
+    )
+    development_context = (
+        "feature", "new feature", "implement", "develop", "development",
+        "change", "changes", "add", "banana", "banani", "banane",
+        "kam krna", "kaam karna", "work", "shipra", "project",
+    )
+
+    has_architecture_signal = any(x in q for x in architecture_phrases)
+    has_development_context = any(x in q for x in development_context)
+    return has_architecture_signal and has_development_context
+
+
 def detect_request_profile(question):
     """Deterministically identify Shipra scope, entity, action, and request mode."""
     raw = str(question or "").strip()
@@ -2721,6 +2746,16 @@ def detect_request_profile(question):
         "why using", "why use", "what does", "what is", "explain",
         "purpose of", "used for", "use of", "working of", "kis liye", "kyun", "q use"
     ))
+
+    # Architecture/development-guidance questions describe how Shipra is structured.
+    # They are NOT end-user workflows and NOT requests to implement a feature right now.
+    if is_architecture_question(raw):
+        return {
+            "scope": "project",
+            "mode": PROJECT_EXISTING,
+            "action": "architecture",
+            "entity": "project architecture",
+        }
 
     prompt_words = (
         "generate prompt", "coding prompt", "prompt bana", "prompt banao",
@@ -2743,7 +2778,10 @@ def detect_request_profile(question):
     )
     explicit_code_change = any(
         phrase in lowered for phrase in explicit_change_phrases
-    )
+    ) or bool(re.search(
+        r"\b(?:add|implement|build|develop|create)\s+(?:(?:a|an)\s+)?(?:new\s+)?feature\b",
+        lowered,
+    ))
 
     entity_aliases = [
         ("return order", ("return order", "return orders", "returnorder")),
@@ -3074,6 +3112,20 @@ def get_mcp_seed_queries(question, search_results):
             value = str(value or "").strip()
             if len(value) >= 3 and value not in seeds:
                 seeds.append(value)
+
+    # Architecture questions need representative evidence across project layers,
+    # not a fake search for one feature workflow.
+    if is_architecture_question(question):
+        add(
+            "Shipra.Frontend src pages",
+            "AxiosInterceptors",
+            "Controllers",
+            "Features Commands Queries Handler Validator",
+            "Shipra.Backend.API.Core",
+            "Repository",
+            "DbContext",
+            "ServiceCollectionExtensions",
+        )
 
     # Explicit filenames are hard retrieval targets and are searched first.
     for named_file in extract_named_source_files(question):
@@ -3407,6 +3459,8 @@ def extract_named_source_files(question):
 
 def is_explanation_question(question):
     q=str(question or "").lower()
+    if is_architecture_question(question):
+        return True
     return bool(extract_named_source_files(question)) and any(p in q for p in (
         "why", "what does", "what is", "explain", "purpose", "used for",
         "use of", "working", "kis liye", "kyun", "q use"))
@@ -5757,107 +5811,6 @@ def build_displayed_evidence_capabilities(answer):
     }
 
 
-def deterministic_code_flow_explanations(answer):
-    """Replace generated code explanations with facts derived from displayed executable code."""
-    if not answer or "### Actual Project Code Flow" not in answer:
-        return answer
-
-    flow_pos = answer.find("### Actual Project Code Flow")
-    head, flow = answer[:flow_pos], answer[flow_pos:]
-
-    def strip_comments(code):
-        code = re.sub(r"/\*.*?\*/", "", code, flags=re.S)
-        code = re.sub(r"^\s*///.*?$", "", code, flags=re.M)
-        code = re.sub(r"^\s*//.*?$", "", code, flags=re.M)
-        return code
-
-    def make_explanation(code):
-        exe = strip_comments(code)
-        out = []
-        def has(p):
-            return bool(re.search(p, exe, flags=re.I | re.S))
-
-        if has(r"\bclass\s+CreateProductCommand\b"):
-            out.append("- Defines the displayed request structure used for product creation.")
-            if has(r"\bProductStocks\b"):
-                out.append("- Includes a `ProductStocks` collection in the request.")
-            return out
-
-        facts = [
-            (r"\bGetProductBySKUAsync\s*\(", "- Calls `_productRepository.GetProductBySKUAsync(...)` to look up the SKU for the current client."),
-            (r"\bif\s*\(\s*existedProduct\s+is\s+null\s*\)", "- The displayed creation branch runs when `existedProduct` is `null`."),
-            (r"\bGetProduct\s*\(", "- Calls `GetProduct(...)` to construct the product object."),
-            (r"\bCreateProductAsync\s*\(", "- Calls `_productRepository.CreateProductAsync(...)` with the constructed product."),
-            (r"\brequest\.StoreId\.GetValueOrDefault\(\)\s*>\s*0", "- Checks whether `StoreId` is greater than 0 before the displayed store-association logic."),
-            (r"\bCreateStoreProduct\s*\(", "- Calls `_storeRepository.CreateStoreProduct(...)` for the displayed store-product association."),
-            (r"\bGetProductVariants\s*\(", "- Calls `ProductCommon.GetProductVariants(...)` using the displayed product/stock data."),
-            (r"\bCreateProductVariantsAsync\s*\(", "- Calls `_productRepository.CreateProductVariantsAsync(...)` with the generated variants."),
-            (r"\bGetInventoryBalances\s*\(", "- Calls `ProductCommon.GetInventoryBalances(...)` to build inventory-balance records from variants and `ProductStocks`."),
-        ]
-        for pattern, sentence in facts:
-            if has(pattern):
-                out.append(sentence)
-
-        # Accept any variable name used for the balance list, e.g. balances or oInventoryBalanceList.
-        if has(r"\bif\s*\(\s*[A-Za-z_]\w*\.Any\(\)\s*\)"):
-            out.append("- The displayed code checks whether the generated list contains any entries.")
-
-        persist = re.search(
-            r"\b((?:Create|Add|Save|Update|Insert)\w*InventoryBalance\w*(?:Async)?)\s*\(",
-            exe, flags=re.I
-        )
-        if persist:
-            out.append(
-                f"- Calls `{persist.group(1)}(...)`; this visible call is evidence of inventory-balance persistence."
-            )
-
-        success = has(
-            r"\b(?:response|serviceResult)\.IsSuccess\s*=\s*true\b|"
-            r"\bServiceResultDTO\s*\([^;]*(?:success|true)"
-        )
-        returned = has(r"\breturn\s+(?:response|serviceResult)\s*;")
-        if success and returned:
-            out.append("- Explicitly marks the result as successful and returns that result.")
-        elif returned:
-            out.append("- Returns the displayed result object; this alone does not prove success.")
-
-        return out
-
-    # Process heading-delimited sections in Actual Project Code Flow.
-    section_pattern = re.compile(r"(?ms)^####?\s+.*?(?=^####?\s+|\Z)")
-
-    def rewrite(match):
-        section = match.group(0)
-        blocks = re.findall(
-            r"```(?:[A-Za-z0-9_+#.-]+)?\s*\n(.*?)```",
-            section, flags=re.S
-        )
-        if not blocks:
-            return section
-
-        bullets = make_explanation("\n".join(blocks))
-        if not bullets:
-            return section
-
-        replacement = "*What this code does:*\n\n" + "\n".join(bullets)
-        existing = re.search(
-            r"(?is)\*What this code does:\*\s*.*?(?=(?:\n\s*\*?Evidence gaps?\*?:|\Z))",
-            section
-        )
-        if existing:
-            return section[:existing.start()] + replacement + section[existing.end():]
-
-        # Insert after final displayed code block.
-        matches = list(re.finditer(
-            r"```(?:[A-Za-z0-9_+#.-]+)?\s*\n.*?```",
-            section, flags=re.S
-        ))
-        at = matches[-1].end()
-        return section[:at] + "\n\n" + replacement + section[at:]
-
-    return head + section_pattern.sub(rewrite, flow)
-
-
 def enforce_displayed_evidence_boundary(answer, question):
     """Rebuild backend guide and sanitize prose from evidence visible in the final answer."""
     if not answer or "### Actual Project Code Flow" not in answer:
@@ -6660,6 +6613,16 @@ If existing functionality directly supports the requested operation:
 - Do not add a Proposed implementation section for a usage question.
 - Do not create a replacement form, service, or API wrapper unnecessarily.
 
+ARCHITECTURE / DEVELOPMENT-GUIDANCE QUESTION RULES:
+- Questions asking which Shipra layers/files/parts must be touched for a new feature are architecture guidance, NOT an end-user workflow and NOT an instruction to implement that feature.
+- Do NOT output Practical Scenario Guide for these questions.
+- Start with a direct heading such as `### Shipra Development Layers` (translated naturally when needed), then explain the verified layers in implementation order.
+- Use representative retrieved files to establish project conventions: frontend UI/components, frontend API/helper layer, API/controller exposure, Application Commands/Queries/Handlers/Validators, Core/domain, repository/infrastructure/persistence, database/migrations when actually evidenced, and DI/configuration when actually evidenced.
+- Clearly say that not every feature requires every layer; only include a layer as a Shipra-specific fact when retrieved project evidence supports it.
+- Do not search for or pretend there is one existing screen for the hypothetical new feature.
+- Do not add a `Proposed implementation` section unless the user explicitly asks to implement/change code now.
+- End with `### Actual Project Code Flow` and show concise representative verified source evidence.
+
 EXPLANATION QUESTION RULES:
 - WHY/WHAT-DOES/PURPOSE questions about a named file are explanations, not workflows.
 - Do NOT output Practical Scenario Guide for explanation questions.
@@ -6852,9 +6815,6 @@ USER QUESTION:
         verified_answer = sanitize_code_flow_explanations(
             verified_answer,
             verified_capabilities,
-        )
-        verified_answer = deterministic_code_flow_explanations(
-            verified_answer
         )
         verified_answer = enforce_displayed_evidence_boundary(
             verified_answer,
