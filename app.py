@@ -5269,6 +5269,10 @@ def clean_assistant_display_text(answer):
 
 def build_verified_mcp_fallback_answer(question, mcp_results):
     """Build a question-specific fallback from verified MCP evidence only."""
+    architecture_answer = build_architecture_guidance_answer(question)
+    if architecture_answer is not None:
+        return architecture_answer
+
     response_language = get_response_language(question)
     results = list(mcp_results or [])
 
@@ -6187,7 +6191,61 @@ def get_accuracy_continuation_queries(question, results):
     return list(dict.fromkeys(q for q in queries if q.strip()))[:2]
 
 
+
+def build_architecture_guidance_answer(question):
+    """Fast deterministic answer for Shipra architecture/development-layer questions."""
+    if not is_architecture_question(question):
+        return None
+
+    if get_response_language(question) == "Roman Urdu":
+        return """### Shipra mein new feature ke liye kin layers mein kaam hota hai?
+
+Shipra ke existing project structure ke mutabiq, new feature ki requirement par depend karte hue aam tor par ye layers check/change hoti hain:
+
+1. **Frontend Layer** – `Shipra.Frontend` mein page/component/modal/form aur required UI validation.
+2. **Frontend API Layer** – frontend se backend request bhejne ke liye existing API/Axios helper ko use ya extend karna.
+3. **API / Controller Layer** – agar new backend operation chahiye ho to endpoint/controller action expose karna.
+4. **Application Layer** – `Command`/`Query`, `Handler`, `Validator` aur required request/response models add ya update karna.
+5. **Core / Domain Layer** – new business entity, enum, value object ya business rule ho to `Shipra.Backend.API.Core` update karna.
+6. **Repository / Persistence Layer** – database read/write ke liye repository methods/implementation add ya update karna.
+7. **Database Layer** – sirf jab feature ko new table, column, relation ya schema change chahiye ho.
+8. **DI / Configuration** – new service/repository introduce ho to service registration/configuration update karna.
+
+**Important:** Har feature mein ye sari layers change karna zaroori nahi. Sirf UI change ho to backend/database touch nahi hoga; complete business feature mein frontend se database tak multiple layers involve ho sakti hain.
+
+### Typical Shipra Development Flow
+
+`Frontend UI → Frontend API Helper → API/Controller → Command/Query → Handler/Validator → Domain Logic → Repository → Database`
+
+Feature implement karte waqt pehle existing similar Shipra feature ka end-to-end flow trace karna best hai, phir sirf required layers mein changes karne chahiye."""
+    return """### Shipra development layers for a new feature
+
+Depending on the feature, Shipra commonly requires changes across these layers:
+
+1. **Frontend Layer** – page/component/modal/form and UI validation in `Shipra.Frontend`.
+2. **Frontend API Layer** – use or extend the frontend API/Axios helper for backend requests.
+3. **API / Controller Layer** – expose a controller action/endpoint when a new backend operation is required.
+4. **Application Layer** – add or update the `Command`/`Query`, `Handler`, `Validator`, and request/response models.
+5. **Core / Domain Layer** – update `Shipra.Backend.API.Core` when introducing business entities, enums, value objects, or domain rules.
+6. **Repository / Persistence Layer** – add or update repository operations for database reads/writes.
+7. **Database Layer** – only when a new table, column, relationship, or schema change is required.
+8. **DI / Configuration** – register new services/repositories and required configuration.
+
+**Important:** Not every feature requires every layer. A UI-only change may not touch the backend or database, while a complete business feature can span several layers.
+
+### Typical Shipra Development Flow
+
+`Frontend UI → Frontend API Helper → API/Controller → Command/Query → Handler/Validator → Domain Logic → Repository → Database`"""
+
+
 def ask_shipra_project_ai(question, intent):
+    # ARCHITECTURE FAST PATH:
+    # These are project-structure guidance questions, not end-user workflows.
+    # Answer deterministically before history retrieval, MCP startup, RAG, or Groq.
+    architecture_answer = build_architecture_guidance_answer(question)
+    if architecture_answer is not None:
+        return clean_assistant_display_text(architecture_answer), []
+
     response_language = get_response_language(question)
     code_explanation_heading = (
         "**What this code does:**"
