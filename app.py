@@ -3300,6 +3300,17 @@ def detect_request_profile(question):
         lowered,
     ))
 
+    # A request to create a UI/control is a source-code change even when the
+    # user naturally says "how to create".  Previously this was routed as an
+    # existing-feature workflow, causing the answer to invent clicks and API
+    # behaviour from an unrelated component import.
+    explicit_code_change = explicit_code_change or bool(re.search(
+        r"\b(?:add|create|build|implement|develop)\s+(?:(?:a|an)\s+)?"
+        r"(?:new\s+)?(?:delete|edit|save|submit|action)?\s*"
+        r"(?:button|modal|component|handler|endpoint|api|route)\b",
+        lowered,
+    ))
+
     entity_aliases = [
         ("return order", ("return order", "return orders", "returnorder")),
         ("order label", ("order label", "order labels", "client order label")),
@@ -7288,6 +7299,11 @@ Conversation context (may be empty):
 If request type is project_change, do not claim the requested new feature
 already exists merely because similar project code was retrieved. Existing code
 is only a reference unless it directly implements the requested feature.
+For a project_change request, never describe a page, list, refresh, API call,
+or success outcome as an existing Shipra behaviour unless the supplied excerpt
+directly verifies it.  Label every new step and every new code block as
+proposed.  An import by itself is only a reusable visual reference; it does not
+prove a control is rendered or that any delete operation exists.
 
 Answer directly. Do not output CLARIFICATION or ask the user to choose
 components or implementation details. State a reasonable assumption if needed.
