@@ -3022,6 +3022,140 @@ def build_data_query_answer(question, results):
         "With a connected read-only production database or relevant runtime dataset, this query can return the exact count."
     )
 
+
+def _extract_json_object(text):
+    """Safely extract one JSON object from an LLM response."""
+    import json
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    try:
+        obj = json.loads(raw)
+        return obj if isinstance(obj, dict) else None
+    except Exception:
+        pass
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if not m:
+        return None
+    try:
+        obj = json.loads(m.group(0))
+        return obj if isinstance(obj, dict) else None
+    except Exception:
+        return None
+
+
+def semantic_route_with_groq(question):
+    """
+    LLM fallback router for wording not confidently handled by deterministic fast paths.
+    It classifies intent only; it never supplies Shipra facts or counts.
+    """
+    prompt = f"""
+You are an intent router for the Shipra project assistant.
+Understand English, Urdu, Roman Urdu, mixed language, typos, paraphrases, and informal wording.
+
+Return JSON ONLY:
+{{
+  "intent": "codebase_location|data_query|architecture_guidance|project_workflow|code_explanation|general",
+  "action": "locate|count|explain|guide|workflow|general",
+  "entity": "short subject or null",
+  "status": "status/filter or null",
+  "confidence": 0.0
+}}
+
+Rules:
+- Asking where code/config/class/function/service is located => codebase_location.
+- Asking count/total/how many of business records, optionally by status => data_query.
+- Asking which layers/files/steps are needed to add/build a feature => architecture_guidance.
+- Asking how an existing Shipra feature/process works or is performed => project_workflow.
+- Asking why/what a specific code/file/function does => code_explanation.
+- Never invent project facts, file paths, database values, or counts.
+- If unclear, choose general with low confidence.
+
+User question:
+{question}
+""".strip()
+
+    try:
+        # Reuse the app's existing Groq wrapper so no second client/config is introduced.
+        raw = call_groq(prompt, temperature=0)
+    except TypeError:
+        try:
+            raw = call_groq(prompt)
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+    obj = _extract_json_object(raw)
+    if not obj:
+        return None
+
+    allowed = {
+        "codebase_location", "data_query", "architecture_guidance",
+        "project_workflow", "code_explanation", "general"
+    }
+    intent = str(obj.get("intent") or "").strip().lower()
+    if intent not in allowed:
+        return None
+    try:
+        confidence = float(obj.get("confidence", 0))
+    except Exception:
+        confidence = 0.0
+    obj["confidence"] = max(0.0, min(1.0, confidence))
+    return obj
+
+
+def get_hybrid_route(question):
+    """
+    Fast deterministic routes first; semantic LLM fallback only for unresolved wording.
+    This keeps common queries fast while generalizing to unseen phrasing.
+    """
+    raw = str(question or "").strip()
+
+    if is_data_aggregate_question(raw):
+        c = get_data_query_contract(raw)
+        return {"intent": "data_query", "action": "count",
+                "entity": c.get("entity"), "status": c.get("status"),
+                "confidence": 1.0, "source": "fast_path"}
+
+    if is_codebase_location_question(raw):
+        return {"intent": "codebase_location", "action": "locate",
+                "entity": raw, "status": None,
+                "confidence": 1.0, "source": "fast_path"}
+
+    if is_architecture_question(raw):
+        return {"intent": "architecture_guidance", "action": "guide",
+                "entity": raw, "status": None,
+                "confidence": 1.0, "source": "fast_path"}
+
+    semantic = semantic_route_with_groq(raw)
+    if semantic and semantic.get("confidence", 0) >= 0.68:
+        semantic["source"] = "semantic_router"
+        return semantic
+
+    return {"intent": "general", "action": "general",
+            "entity": raw, "status": None,
+            "confidence": float((semantic or {}).get("confidence", 0)),
+            "source": "fallback"}
+
+
+def _get_semantic_route_cache():
+    if "_shipra_semantic_route_cache" not in st.session_state:
+        st.session_state["_shipra_semantic_route_cache"] = {}
+    return st.session_state["_shipra_semantic_route_cache"]
+
+
+def get_cached_hybrid_route(question):
+    key = _normalize_intent_text(question)
+    cache = _get_semantic_route_cache()
+    if key in cache:
+        return cache[key]
+    route = get_hybrid_route(question)
+    cache[key] = route
+    while len(cache) > 100:
+        cache.pop(next(iter(cache)))
+    return route
+
 def detect_request_profile(question):
     """Deterministically identify Shipra scope, entity, action, and request mode."""
     raw = str(question or "").strip()
@@ -3188,6 +3322,26 @@ def detect_request_profile(question):
             "action": action or ("explain" if explanation_request else None),
             "entity": entity,
         }
+
+    # Semantic fallback for unseen English/Urdu/Roman-Urdu phrasing.
+    semantic = get_cached_hybrid_route(raw)
+    semantic_intent = semantic.get("intent")
+    if semantic.get("source") == "semantic_router":
+        if semantic_intent == "codebase_location":
+            return {"scope": "project", "mode": PROJECT_EXISTING, "action": "locate",
+                    "entity": semantic.get("entity") or raw}
+        if semantic_intent == "data_query":
+            return {"scope": "data", "mode": "data_query", "action": "count",
+                    "entity": semantic.get("entity") or raw, "status": semantic.get("status")}
+        if semantic_intent == "architecture_guidance":
+            return {"scope": "project", "mode": "architecture", "action": "guide",
+                    "entity": semantic.get("entity") or raw}
+        if semantic_intent == "code_explanation":
+            return {"scope": "project", "mode": PROJECT_EXISTING, "action": "explain",
+                    "entity": semantic.get("entity") or raw}
+        if semantic_intent == "project_workflow":
+            return {"scope": "project", "mode": PROJECT_EXISTING, "action": "workflow",
+                    "entity": semantic.get("entity") or raw}
 
     return {
         "scope": "general",
@@ -6687,6 +6841,8 @@ def _get_location_answer_cache():
 
 
 def ask_shipra_project_ai(question, intent):
+    # Hybrid semantic route is cached. Deterministic fast paths remain authoritative.
+    hybrid_route = get_cached_hybrid_route(question)
     # ARCHITECTURE FAST PATH:
     # These are project-structure guidance questions, not end-user workflows.
     # Answer deterministically before history retrieval, MCP startup, RAG, or Groq.
@@ -6695,7 +6851,7 @@ def ask_shipra_project_ai(question, intent):
         return clean_assistant_display_text(architecture_answer), []
 
     # Repeated verified location lookup: instant session-cache response.
-    if is_codebase_location_question(question):
+    if is_codebase_location_question(question) or hybrid_route.get("intent") == "codebase_location":
         cached = _get_location_answer_cache().get(_location_cache_key(question))
         if cached:
             return cached["answer"], cached["results"]
@@ -6898,7 +7054,7 @@ def ask_shipra_project_ai(question, intent):
     # CODEBASE LOCATION FAST RENDER:
     # Retrieval has already been verified by MCP. Location questions must never
     # fall through to Practical Scenario Guide / workflow formatting.
-    if is_codebase_location_question(question):
+    if is_codebase_location_question(question) or hybrid_route.get("intent") == "codebase_location":
         location_answer = clean_assistant_display_text(
             build_codebase_location_answer(question, results)
         )
@@ -6914,7 +7070,7 @@ def ask_shipra_project_ai(question, intent):
     # DATA QUERY FAST RENDER:
     # Counts/totals/status questions are answered from connected data evidence,
     # never from source-code workflow inference.
-    if is_data_aggregate_question(question):
+    if is_data_aggregate_question(question) or hybrid_route.get("intent") == "data_query":
         return build_data_query_answer(question, results), results
 
     mock_answer = answer_from_mock_data(
@@ -7146,6 +7302,14 @@ If existing functionality directly supports the requested operation:
 - Explain how to use it and trace its existing code.
 - Do not add a Proposed implementation section for a usage question.
 - Do not create a replacement form, service, or API wrapper unnecessarily.
+
+HYBRID SEMANTIC ROUTER RULES:
+- Deterministic fast paths handle obvious high-frequency intents for speed.
+- Unseen wording is classified semantically by the LLM; do not require exact keywords.
+- The semantic router classifies only. It is NOT evidence and must never invent Shipra facts.
+- Project facts/locations/workflows must still be grounded in MCP evidence.
+- Business counts must still be grounded in connected runtime/mock/database evidence.
+- If evidence is insufficient, state the limitation rather than filling gaps.
 
 DATA / AGGREGATE QUESTION RULES:
 - HOW MANY / COUNT / TOTAL / KITNY / KITNE / کتنے questions about orders, returns, shipments, products, inventory, customers, invoices, payments or sales are DATA_QUERY intents.
