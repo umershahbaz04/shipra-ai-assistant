@@ -5661,7 +5661,7 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
             "The guide and code flow below are based on verified MCP project evidence."
         )
         explanation_heading = "**What this code shows:**"
-        explanation = "This is an exact MCP-verified source excerpt matched to the requested workflow."
+        explanation = "This is an exact MCP-verified source excerpt matched to the request."
 
     shown = 0
     for result in results:
@@ -6425,6 +6425,105 @@ Depending on the feature, Shipra commonly requires changes across these layers:
 `Frontend UI → Frontend API Helper → API/Controller → Command/Query → Handler/Validator → Domain Logic → Repository → Database`"""
 
 
+
+def build_codebase_location_answer(question, results):
+    """Direct MCP-grounded renderer for codebase location questions."""
+    verified = list(results or [])
+    if not verified:
+        return (
+            "### Codebase Location\n\n"
+            "Requested item ki exact location MCP source evidence se verify nahi ho saki. "
+            "Main unverified file path guess nahi kar raha."
+        )
+
+    # One card per unique verified file.
+    unique = []
+    seen = set()
+    for item in verified:
+        path = str(item.get("file_path") or item.get("path") or "").strip()
+        if not path:
+            continue
+        key = path.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+        if len(unique) >= 5:
+            break
+
+    if not unique:
+        return (
+            "### Codebase Location\n\n"
+            "MCP evidence mili, lekin exact source file path verify nahi ho saka."
+        )
+
+    roman = get_response_language(question) != "English"
+    lines = [
+        "### Codebase Location",
+        "",
+        (
+            "Requested code/configuration in MCP-verified locations par mila:"
+            if roman else
+            "The requested code/configuration was found at these MCP-verified locations:"
+        ),
+        "",
+    ]
+
+    for idx, item in enumerate(unique, 1):
+        path = str(item.get("file_path") or item.get("path") or "").strip()
+        symbol = str(
+            item.get("function_class")
+            or item.get("symbol")
+            or item.get("name")
+            or ""
+        ).strip()
+        snippet = str(
+            item.get("text")
+            or item.get("content")
+            or item.get("snippet")
+            or ""
+        ).strip()
+
+        lines.append(f"**{idx}. `{path}`**")
+        if symbol and symbol.lower() not in {"not detected", "none", "null"}:
+            lines.append(f"**Function/Class:** `{symbol}`")
+
+        searchable = f"{path}\n{symbol}\n{snippet}".lower()
+        if "servicecollectionextensions" in searchable and "installapplicationservices" in searchable:
+            role = (
+                "Application-layer dependency/service registrations yahan configured hain."
+                if roman else
+                "Application-layer dependency/service registrations are configured here."
+            )
+        elif "servicecollectionextensions" in searchable and "installservices" in searchable:
+            role = (
+                "Web-layer service registrations yahan configured hain."
+                if roman else
+                "Web-layer service registrations are configured here."
+            )
+        elif "authenticationextensions" in searchable or "addscopedjwtauthentication" in searchable:
+            role = (
+                "Authentication/JWT-related dependency registration yahan configured hai."
+                if roman else
+                "Authentication/JWT-related dependency registration is configured here."
+            )
+        else:
+            role = (
+                "Yeh requested item ka verified source location hai."
+                if roman else
+                "This is a verified source location for the requested item."
+            )
+        lines.append(f"**Role:** {role}")
+        lines.append("")
+
+    primary = str(unique[0].get("file_path") or unique[0].get("path") or "").strip()
+    lines.append(
+        f"**Primary matched location:** `{primary}`"
+        if not roman else
+        f"**Main matched location:** `{primary}`"
+    )
+    return "\n".join(lines).strip()
+
 def ask_shipra_project_ai(question, intent):
     # ARCHITECTURE FAST PATH:
     # These are project-structure guidance questions, not end-user workflows.
@@ -6627,6 +6726,14 @@ def ask_shipra_project_ai(question, intent):
                     st.text(message)
 
         return build_verified_evidence_gap_answer(question), []
+
+    # CODEBASE LOCATION FAST RENDER:
+    # Retrieval has already been verified by MCP. Location questions must never
+    # fall through to Practical Scenario Guide / workflow formatting.
+    if is_codebase_location_question(question):
+        return clean_assistant_display_text(
+            build_codebase_location_answer(question, results)
+        ), results
 
     mock_answer = answer_from_mock_data(
         question,
@@ -6857,6 +6964,14 @@ If existing functionality directly supports the requested operation:
 - Explain how to use it and trace its existing code.
 - Do not add a Proposed implementation section for a usage question.
 - Do not create a replacement form, service, or API wrapper unnecessarily.
+
+CODEBASE LOCATION QUESTION RULES:
+- WHERE/KAHAN/KIDHAR/KIS FILE/KIS JAGA questions about project code are direct codebase lookups, not user workflows.
+- NEVER output `Practical Scenario Guide`, `Expected Result`, UI/navigation limitations, or workflow wording for these questions.
+- Start with `### Codebase Location`.
+- State the exact MCP-verified file path(s), then Function/Class when verified, and briefly explain each location's role.
+- Do not guess a path. If MCP cannot verify the location, say that exact location could not be verified.
+- Prefer the most direct matching file as the primary location; related verified configuration files may be listed as additional locations.
 
 ARCHITECTURE / DEVELOPMENT-GUIDANCE QUESTION RULES:
 - Questions asking which Shipra layers/files/parts must be touched for a new feature are architecture guidance, NOT an end-user workflow and NOT an instruction to implement that feature.
