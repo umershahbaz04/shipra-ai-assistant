@@ -5694,6 +5694,91 @@ def replace_backend_guide_with_verified_capabilities(answer, question, coverage,
     return guide.rstrip() + "\n\n" + answer[code_pos:]
 
 
+def sanitize_code_flow_explanations(answer, capabilities):
+    """Keep code explanations inside the same executable-evidence boundary as the guide."""
+    if not answer or "### Actual Project Code Flow" not in answer:
+        return answer
+
+    caps = capabilities or {}
+    lines = []
+    for line in answer.splitlines():
+        low = line.lower()
+
+        # Inventory balance construction is verified, but persistence is a separate capability.
+        if caps.get("inventory_build_verified") and not caps.get("inventory_persist_verified"):
+            if "inventory balance" in low and re.search(
+                r"\b(persist|persists|persisted|save|saves|saved|create in database|created in database)\b",
+                low,
+            ):
+                # Preserve the verified construction/check without claiming unseen persistence.
+                indent = re.match(r"^\s*", line).group(0)
+                prefix = ""
+                m = re.match(r"^(\s*(?:[-*]|\d+\.)\s*)", line)
+                if m:
+                    prefix = m.group(1)
+                    indent = ""
+                line = (
+                    f"{indent}{prefix}**Inventory balances** – Builds inventory-balance "
+                    "records from the generated variants and stock data. The visible excerpt "
+                    "then checks whether records exist; persistence is not visible in the "
+                    "supplied excerpt."
+                )
+
+        # Comments cannot establish stock/inventory history execution.
+        if not caps.get("history_create_verified") and re.search(
+            r"\b(stock history|stockhistory|inventory history|inventoryhistory)\b",
+            low,
+        ):
+            # Evidence-gap statements are allowed; execution claims are not.
+            if not any(
+                phrase in low
+                for phrase in (
+                    "not shown", "not visible", "not verified", "inferred from comments",
+                    "comment", "evidence gap", "omitted",
+                )
+            ):
+                continue
+
+        # No verified success return => remove/qualify success/failure-return claims.
+        if not caps.get("success_return_verified") and (
+            "returns a serviceresultdto" in low
+            or "return success" in low
+            or "returns success" in low
+            or "indicating success or failure" in low
+            or "success response" in low
+        ):
+            if re.match(r"^\s*\d+\.", line) or re.match(r"^\s*[-*]", line):
+                continue
+            line = (
+                "The supplied executable excerpt does not show the final success/failure "
+                "return behavior."
+            )
+
+        # No HTTP route evidence => strip transport claims from code explanations too.
+        if not caps.get("http_route_verified") and (
+            "http request" in low
+            or "api endpoint" in low
+            or "http endpoint" in low
+            or re.search(r"\b(post|get|put|delete)\s+request\b", low)
+        ):
+            continue
+
+        # Do not turn comments into executable duplicate-SKU rejection.
+        if "sku" in low and not re.search(r"\bthrow\b", answer, flags=re.I):
+            if ("operation fails" in low or "throws an exception" in low) and (
+                "comment" not in low and "not visible" not in low and "not shown" not in low
+            ):
+                line = (
+                    "The executable excerpt verifies the SKU lookup and the "
+                    "`existedProduct is null` creation branch; the duplicate-SKU rejection "
+                    "behavior is not visible in the supplied excerpt."
+                )
+
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
 def sanitize_unverified_execution_claims(answer, coverage):
     """Remove common execution claims that require evidence layers not retrieved."""
     if not answer:
@@ -6237,6 +6322,7 @@ ACCURACY CONTRACT:
 - Never invent an HTTP method, endpoint, controller, route, or direct handler invocation when API/controller evidence is absent.
 - If an excerpt ends immediately after constructing data or opening an if/loop/block, describe only the visible construction/check; do not claim what the unseen continuation does.
 - For backend-only workflow guides, executable method calls are stronger evidence than comments. Never promote comments, DTO property names, or truncated continuation into completed behavior.
+- Apply the same evidence boundary to every `What this code does` section and Evidence Gaps: if persistence/history/success is beyond the visible excerpt, explicitly say it is not visible instead of describing it as completed.
 - Never turn semantic similarity into a project fact.
 - The entity requested by the user and the operation requested by the user
   must both match the code before you present usage steps.
@@ -6573,6 +6659,10 @@ USER QUESTION:
             answer_text,
             code_cards,
             minimum_cards=minimum_code_cards,
+        )
+        verified_answer = sanitize_code_flow_explanations(
+            verified_answer,
+            verified_capabilities,
         )
         return clean_assistant_display_text(verified_answer), results
 
