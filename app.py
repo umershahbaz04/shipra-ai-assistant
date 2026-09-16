@@ -6445,7 +6445,7 @@ Depending on the feature, Shipra commonly requires changes across these layers:
 
 
 def build_codebase_location_answer(question, results):
-    """Direct MCP-grounded renderer for codebase location questions."""
+    """Fast direct renderer: exact location + symbol + small verified code excerpt."""
     verified = list(results or [])
     if not verified:
         return (
@@ -6454,53 +6454,55 @@ def build_codebase_location_answer(question, results):
             "Main unverified file path guess nahi kar raha."
         )
 
-    # One card per unique verified file.
     unique = []
     seen = set()
     for item in verified:
         path = str(item.get("file_path") or item.get("path") or "").strip()
-        if not path:
+        if not path or path.lower() in seen:
             continue
-        key = path.lower()
-        if key in seen:
-            continue
-        seen.add(key)
+        seen.add(path.lower())
         unique.append(item)
-        if len(unique) >= 5:
+        if len(unique) >= 4:
             break
 
     if not unique:
-        return (
-            "### Codebase Location\n\n"
-            "MCP evidence mili, lekin exact source file path verify nahi ho saka."
-        )
+        return "### Codebase Location\n\nMCP evidence mili, lekin exact source file path verify nahi ho saka."
 
     roman = get_response_language(question) != "English"
     lines = [
-        "### Codebase Location",
-        "",
-        (
-            "Requested code/configuration in MCP-verified locations par mila:"
-            if roman else
-            "The requested code/configuration was found at these MCP-verified locations:"
-        ),
-        "",
+        "### Codebase Location", "",
+        ("Requested code/configuration in MCP-verified locations par mila:"
+         if roman else
+         "The requested code/configuration was found at these MCP-verified locations:"),
+        ""
     ]
 
     for idx, item in enumerate(unique, 1):
         path = str(item.get("file_path") or item.get("path") or "").strip()
         symbol = str(
-            item.get("function_class")
-            or item.get("symbol")
-            or item.get("name")
-            or ""
+            item.get("function_class") or item.get("symbol") or item.get("name") or ""
         ).strip()
         snippet = str(
-            item.get("text")
-            or item.get("content")
-            or item.get("snippet")
-            or ""
+            item.get("text") or item.get("content") or item.get("snippet") or ""
         ).strip()
+
+        # Keep only a small exact MCP excerpt so the answer remains fast/readable.
+        if snippet:
+            snippet_lines = snippet.splitlines()
+            # Prefer lines around DI/configuration registrations when present.
+            keys = (
+                "IServiceCollection", "AddTransient", "AddScoped", "AddSingleton",
+                "InstallApplicationServices", "InstallServices", "AddAuthentication",
+                "AddJwtBearer", "AddMediatR", "AddAutoMapper"
+            )
+            hit = next(
+                (i for i, line in enumerate(snippet_lines)
+                 if any(k.lower() in line.lower() for k in keys)),
+                0
+            )
+            lo = max(0, hit - 2)
+            hi = min(len(snippet_lines), hit + 7)
+            snippet = "\n".join(snippet_lines[lo:hi]).strip()
 
         lines.append(f"**{idx}. `{path}`**")
         if symbol and symbol.lower() not in {"not detected", "none", "null"}:
@@ -6508,37 +6510,32 @@ def build_codebase_location_answer(question, results):
 
         searchable = f"{path}\n{symbol}\n{snippet}".lower()
         if "servicecollectionextensions" in searchable and "installapplicationservices" in searchable:
-            role = (
-                "Application-layer dependency/service registrations yahan configured hain."
-                if roman else
-                "Application-layer dependency/service registrations are configured here."
-            )
+            role = "Application-layer dependency/service registrations yahan configured hain." if roman else "Application-layer dependency/service registrations are configured here."
         elif "servicecollectionextensions" in searchable and "installservices" in searchable:
-            role = (
-                "Web-layer service registrations yahan configured hain."
-                if roman else
-                "Web-layer service registrations are configured here."
-            )
+            role = "Web-layer service registrations yahan configured hain." if roman else "Web-layer service registrations are configured here."
         elif "authenticationextensions" in searchable or "addscopedjwtauthentication" in searchable:
-            role = (
-                "Authentication/JWT-related dependency registration yahan configured hai."
-                if roman else
-                "Authentication/JWT-related dependency registration is configured here."
-            )
+            role = "Authentication/JWT-related dependency registration yahan configured hai." if roman else "Authentication/JWT-related dependency registration is configured here."
         else:
-            role = (
-                "Yeh requested item ka verified source location hai."
-                if roman else
-                "This is a verified source location for the requested item."
-            )
+            role = "Yeh requested item ka verified source location hai." if roman else "This is a verified source location for the requested item."
+
         lines.append(f"**Role:** {role}")
+
+        if snippet:
+            ext = Path(path).suffix.lower()
+            lang = {
+                ".cs": "csharp", ".js": "javascript", ".jsx": "jsx",
+                ".ts": "typescript", ".tsx": "tsx", ".py": "python",
+                ".json": "json", ".sql": "sql"
+            }.get(ext, "")
+            lines.extend(["", "**Relevant code:**", f"```{lang}", snippet, "```"])
+
         lines.append("")
 
     primary = str(unique[0].get("file_path") or unique[0].get("path") or "").strip()
     lines.append(
-        f"**Primary matched location:** `{primary}`"
-        if not roman else
         f"**Main matched location:** `{primary}`"
+        if roman else
+        f"**Primary matched location:** `{primary}`"
     )
     return "\n".join(lines).strip()
 
