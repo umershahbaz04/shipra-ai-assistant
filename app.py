@@ -5548,7 +5548,7 @@ def build_evidence_coverage(question, results):
 
 
 def sanitize_practical_guide(answer, coverage):
-    """Keep the practical guide inside the boundaries of verified project layers."""
+    """Keep the guide useful while preventing unsupported UI or outcome claims."""
     if not answer or "### Practical Scenario Guide" not in answer:
         return answer
 
@@ -5572,46 +5572,105 @@ def sanitize_practical_guide(answer, coverage):
     guide = answer[start:end]
     lines = guide.splitlines()
 
-    # If no frontend source was retrieved, do not transform backend request
-    # properties into instructions for a user. Replace the guide with a safe,
-    # concise process summary and leave exact details to the verified code flow.
+    # Backend-only workflow:
+    # Keep concrete process steps produced from verified evidence, but strip
+    # user-interface wording that is not supported by frontend evidence.
     if not frontend_verified:
+        process_steps = []
+
+        for line in lines:
+            stripped = line.strip()
+            if not re.match(r"^\d+\.", stripped):
+                continue
+
+            step = re.sub(r"^\d+\.\s*", "", stripped).strip()
+            low = step.lower()
+
+            # Reject inferred UI/navigation/control instructions.
+            if re.search(
+                r"\b(open|navigate|click|press|screen|page|modal|button|dropdown|"
+                r"tab|menu|toast|notification)\b",
+                low,
+            ):
+                continue
+
+            # Convert user-input phrasing into neutral process phrasing.
+            replacements = [
+                (r"^fill in\s+", "Provide "),
+                (r"^enter\s+", "Provide "),
+                (r"^type\s+", "Provide "),
+                (r"^choose\s+", "Provide "),
+                (r"^select\s+", "Provide "),
+                (r"^add\s+", "Provide "),
+            ]
+            for pattern, replacement in replacements:
+                step = re.sub(pattern, replacement, step, flags=re.I)
+
+            # Do not keep speculative language as a verified step.
+            if re.search(r"\b(likely|probably|should|would|may be|assume)\b", step, re.I):
+                continue
+
+            if step:
+                process_steps.append(step.rstrip("."))
+
+        # Deduplicate while preserving order.
+        unique_steps = []
+        seen = set()
+        for step in process_steps:
+            key = re.sub(r"\W+", " ", step.lower()).strip()
+            if key and key not in seen:
+                seen.add(key)
+                unique_steps.append(step)
+
         rebuilt = [
             scenario_marker,
             "",
             (
-                "The retrieved project evidence verifies the backend/system process "
-                "for this workflow, but it does not verify the Shipra frontend screen "
-                "or controls needed to perform it."
+                "The retrieved evidence verifies the project process below. "
+                "Exact frontend navigation or control names are not stated unless "
+                "frontend evidence is available."
             ),
             "",
             "**Verified Process:**",
-            (
-                "1. Follow the verified backend sequence described in the "
-                "**Actual Project Code Flow** below. No unverified screen, field, "
-                "button, or navigation step is presented as a user action."
-            ),
+        ]
+
+        if unique_steps:
+            for i, step in enumerate(unique_steps[:8], 1):
+                rebuilt.append(f"{i}. {step}.")
+        elif backend_verified:
+            rebuilt.append(
+                "1. Shipra processes the request according to the verified backend "
+                "sequence shown in the Actual Project Code Flow below."
+            )
+        else:
+            rebuilt.append(
+                "1. The retrieved evidence is not sufficient to state concrete "
+                "workflow steps safely."
+            )
+
+        rebuilt.extend([
             "",
             (
-                "**Expected Result:** Only the backend behavior explicitly verified "
-                "in the code flow below can be confirmed."
+                "**Expected Result:** The verified backend/system behavior described "
+                "in the code flow is completed."
                 if backend_verified
                 else
                 "**Expected Result:** Only behavior explicitly supported by the "
-                "retrieved project evidence can be confirmed."
+                "retrieved evidence can be confirmed."
             ),
             "",
             (
-                "**UI Limitation:** The retrieved evidence does not verify which "
-                "Shipra screen, buttons, fields, or frontend API action trigger "
+                "**UI Limitation:** The retrieved evidence does not verify the exact "
+                "Shipra screen, buttons, fields, or frontend action used to trigger "
                 "this process."
             ),
             "",
-        ]
+        ])
+
         return answer[:start] + "\n".join(rebuilt) + answer[end:]
 
-    # Frontend evidence exists: preserve useful UI steps, but do not claim an
-    # unverified submit/create linkage or an unverified success state.
+    # Frontend exists:
+    # preserve useful UI steps, but remove submit/success claims unless linkage exists.
     kept = []
     for line in lines:
         stripped = line.strip()
@@ -5655,6 +5714,7 @@ def sanitize_practical_guide(answer, coverage):
 
         kept.append(line)
 
+    # Renumber surviving steps.
     n = 0
     fixed = []
     for line in kept:
@@ -5928,7 +5988,8 @@ ACCURACY CONTRACT:
 - A file name alone never proves that a screen, route, action, or workflow is reachable.
 - Do not write a Submit/Create/Save button step unless retrieved frontend evidence shows that action and its handler/linkage.
 - Do not claim a success toast, redirect, list refresh, or newly displayed record unless retrieved frontend evidence explicitly shows that outcome.
-- If frontend evidence is absent for a workflow question, do not convert backend request properties into user-interface steps. Keep the guide backend/process-only and explicitly state the UI evidence gap.
+- If frontend evidence is absent for a workflow question, do not invent UI navigation or controls. Instead create 4-8 short numbered Verified Process steps directly from the retrieved backend evidence, in execution order where the code establishes one. Request properties may be described as required/provided data, but never as named UI fields unless frontend evidence verifies them. Explicitly state the UI evidence gap.
+- Never say an exception is thrown, a record is persisted, a success response is returned, or a later operation completes unless that behavior is visible in the supplied executable excerpt. Comments may be described as comments/intended behavior, not as executed fact.
 - Never turn semantic similarity into a project fact.
 - The entity requested by the user and the operation requested by the user
   must both match the code before you present usage steps.
