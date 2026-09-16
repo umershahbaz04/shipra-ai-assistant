@@ -1,4 +1,3 @@
-SHIPRA_ROUTER_VERSION = "v9-workflow-evidence"
 import os
 import sys
 import json
@@ -77,16 +76,40 @@ def create_conversation(title="New chat"):
 
 
 def list_conversations(limit=40):
-    response = (
-        _chat_db()
-        .table("conversations")
-        .select("id,title,created_at,updated_at")
-        .order("updated_at", desc=True)
-        .limit(limit)
-        .execute()
-    )
-
-    return response.data or []
+    # Prefer persistent pin state when the optional `is_pinned` column exists.
+    # Fall back cleanly for existing deployments that have not added that column.
+    try:
+        response = (
+            _chat_db()
+            .table("conversations")
+            .select("id,title,created_at,updated_at,is_pinned")
+            .order("is_pinned", desc=True)
+            .order("updated_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return response.data or []
+    except Exception:
+        response = (
+            _chat_db()
+            .table("conversations")
+            .select("id,title,created_at,updated_at")
+            .order("updated_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        conversations = response.data or []
+        pinned_ids = st.session_state.get("pinned_conversation_ids", set())
+        for conversation in conversations:
+            conversation["is_pinned"] = conversation.get("id") in pinned_ids
+        conversations.sort(
+            key=lambda item: (
+                bool(item.get("is_pinned")),
+                str(item.get("updated_at") or ""),
+            ),
+            reverse=True,
+        )
+        return conversations
 
 
 def load_conversation(conversation_id):
@@ -156,6 +179,46 @@ def delete_conversation(conversation_id):
         .eq("id", conversation_id)
         .execute()
     )
+
+
+def rename_conversation(conversation_id, new_title):
+    """Rename an existing conversation without changing its messages."""
+    title = re.sub(r"\s+", " ", str(new_title or "")).strip()
+    if not title:
+        raise ValueError("Conversation title cannot be empty.")
+    if len(title) > 80:
+        title = title[:77].rstrip() + "..."
+
+    (
+        _chat_db()
+        .table("conversations")
+        .update({"title": title, "updated_at": utc_now_text()})
+        .eq("id", conversation_id)
+        .execute()
+    )
+
+
+def set_conversation_pinned(conversation_id, pinned):
+    """Pin/unpin a chat; persist in Supabase when schema supports it."""
+    pinned = bool(pinned)
+    try:
+        (
+            _chat_db()
+            .table("conversations")
+            .update({"is_pinned": pinned})
+            .eq("id", conversation_id)
+            .execute()
+        )
+        return True
+    except Exception:
+        # Backward-compatible fallback: pin survives Streamlit reruns in this session.
+        pinned_ids = set(st.session_state.get("pinned_conversation_ids", set()))
+        if pinned:
+            pinned_ids.add(conversation_id)
+        else:
+            pinned_ids.discard(conversation_id)
+        st.session_state["pinned_conversation_ids"] = pinned_ids
+        return False
 
 
 st.set_page_config(
@@ -1160,6 +1223,37 @@ async def debug_mcp_search_code(query="dashboard"):
             }
 
 
+def parse_json_object(text):
+    """Parse the first JSON object from a model response without requiring a pristine reply."""
+    cleaned = (text or "").strip()
+    cleaned = re.sub(
+        r"^```(?:json)?\s*|\s*```$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    try:
+        value = json.loads(cleaned)
+        if isinstance(value, dict):
+            return value
+    except json.JSONDecodeError:
+        pass
+
+    decoder = json.JSONDecoder()
+    for position, character in enumerate(cleaned):
+        if character != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(cleaned[position:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
+
+    return None
+
+
 async def debug_mcp_source_health():
     """Return MCP source-root diagnostics from the server."""
     server_params = get_mcp_server_params()
@@ -1263,12 +1357,49 @@ with st.sidebar.expander("MCP Debug"):
                 st.success(
                     f"MCP can see {total_files} searchable source files."
                 )
-
         except Exception as health_error:
+            import traceback
+
             st.error(
                 "Source health check failed: "
                 f"{type(health_error).__name__}: "
                 f"{health_error}"
+            )
+
+            # Recursively show the REAL error inside nested ExceptionGroups
+            def show_nested_exception(error, level=1):
+                if isinstance(error, BaseExceptionGroup):
+                    for i, sub_error in enumerate(
+                        error.exceptions,
+                        start=1,
+                    ):
+                        st.error(
+                            f"Level {level} - Sub-exception {i}: "
+                            f"{type(sub_error).__name__}: "
+                            f"{sub_error}"
+                        )
+
+                        # Keep opening nested ExceptionGroups
+                        show_nested_exception(
+                            sub_error,
+                            level + 1,
+                        )
+
+            show_nested_exception(health_error)
+
+            # Complete traceback in Streamlit Cloud logs
+            print(
+                "\n========== SOURCE HEALTH CHECK ERROR =========="
+            )
+
+            traceback.print_exception(
+                type(health_error),
+                health_error,
+                health_error.__traceback__,
+            )
+
+            print(
+                "================================================\n"
             )
 
     debug_query = st.text_input(
@@ -2886,35 +3017,7 @@ Latest question:
     raise last_error
 
 
-def parse_json_object(text):
-    """Parse the first JSON object from a model response without requiring a pristine reply."""
-    cleaned = (text or "").strip()
-    cleaned = re.sub(
-        r"^```(?:json)?\s*|\s*```$",
-        "",
-        cleaned,
-        flags=re.IGNORECASE,
-    ).strip()
 
-    try:
-        value = json.loads(cleaned)
-        if isinstance(value, dict):
-            return value
-    except json.JSONDecodeError:
-        pass
-
-    decoder = json.JSONDecoder()
-    for position, character in enumerate(cleaned):
-        if character != "{":
-            continue
-        try:
-            value, _ = decoder.raw_decode(cleaned[position:])
-        except json.JSONDecodeError:
-            continue
-        if isinstance(value, dict):
-            return value
-
-    return None
 
 
 def get_mcp_seed_queries(question, search_results):
@@ -3252,7 +3355,7 @@ Do not mix creating a label with assigning a label to orders.
 For existing UI flows, inspect the page/modal and relevant called functions.
 Read additional lines when validation or response handling is cut off.
 Each read may contain at most 120 lines.
-You have at most 18 turns. Prioritize decisive evidence.
+You have at most 12 turns. Prioritize decisive evidence.
 Indexed leads are search hints, not live evidence or guaranteed paths.
 For UI usage questions, prioritize the matching frontend page/modal.
 Read the relevant function, then search its exact API call name.
@@ -3281,15 +3384,6 @@ GLOBAL VERIFICATION RULES:
 - Before concluding that a feature is missing, search exact wording, likely
   camel/pascal-case identifiers, page names, and exact API names derived from
   the question.
-- For create/update/delete/how-to workflow questions, do not stop at a Command
-  or DTO. Expand outward in BOTH directions: frontend page/modal -> click/submit
-  handler -> imported API helper/endpoint, and command/query -> handler ->
-  repository/service/persistence. Search references/usages for strong symbols.
-- A retrieved frontend page whose path directly names the requested feature is
-  high-priority evidence: verify it with search_code and read the relevant
-  handler before declaring that no UI exists.
-- If one layer is missing, report only that layer as unverified; do not declare
-  the entire workflow unavailable when other connected layers are verified.
 - Do not propose new implementation code while collecting evidence.
 
 Use conversation only to resolve follow-ups; ignore it for a new topic.
@@ -3693,171 +3787,7 @@ Finish when sufficient verified evidence is collected or the exact search is exh
                 })
 
         planner_failures = 0
-        # Deterministic workflow expansion.
-        # RAG/index results are hints only; every hint is re-verified through MCP.
-        # This prevents the planner from seeing one backend DTO and prematurely
-        # concluding that the frontend/API/handler do not exist.
-        q_tokens = tokenize(question)
-        workflow_words = {
-            "create", "add", "update", "edit", "delete", "remove",
-            "how", "workflow", "flow", "kesy", "kaise", "banana",
-        }
-        asks_workflow = bool(q_tokens.intersection(workflow_words))
-
-        if asks_workflow:
-            seed_terms = []
-            # Natural feature phrase.
-            cleaned = re.sub(
-                r"\b(how|to|create|add|update|edit|delete|remove|kesy|kaise|"
-                r"kru|karu|krna|karna|the|a|an)\b",
-                " ",
-                question,
-                flags=re.IGNORECASE,
-            )
-            cleaned = re.sub(r"\s+", " ", cleaned).strip(" ?.")
-            if len(cleaned) >= 3:
-                seed_terms.append(cleaned)
-
-            # Strong identifiers/symbols already discovered by the index.
-            for lead in search_results[:10]:
-                symbol = str(lead.get("symbol") or "").strip()
-                path = str(lead.get("file_path") or "").replace("\\", "/")
-                if symbol and len(symbol) >= 3:
-                    seed_terms.append(symbol)
-                if path:
-                    stem = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-                    parent = path.rsplit("/", 2)[-2] if "/" in path else ""
-                    for term in (stem, parent):
-                        if term and len(term) >= 3 and term.lower() not in {
-                            "index", "pages", "components", "features"
-                        }:
-                            seed_terms.append(term)
-
-            # Preserve order, cap work, and verify every term through MCP.
-            unique_terms = []
-            seen_terms = set()
-            for term in seed_terms:
-                key = term.lower()
-                if key not in seen_terms:
-                    seen_terms.add(key)
-                    unique_terms.append(term)
-
-            for seed_term in unique_terms[:8]:
-                args = {"query": seed_term, "max_results": 30}
-                call_key = "search_code" + json.dumps(args, sort_keys=True)
-                if call_key in completed_calls:
-                    continue
-                completed_calls.add(call_key)
-                try:
-                    seed_result = await mcp_client.call_tool("search_code", args)
-                except Exception as seed_error:
-                    transcript.append({
-                        "tool": "search_code",
-                        "arguments": args,
-                        "status": "execution_failed",
-                        "error": f"{type(seed_error).__name__}: {seed_error}",
-                    })
-                    continue
-
-                payload = seed_result.structured_content
-                if not isinstance(payload, dict):
-                    raw_seed = "\n".join(
-                        block.text for block in seed_result.content
-                        if getattr(block, "type", "") == "text"
-                    )
-                    payload = parse_json_object(raw_seed)
-
-                if not isinstance(payload, dict):
-                    continue
-
-                transcript.append({
-                    "tool": "search_code",
-                    "arguments": args,
-                    "result": payload,
-                    "notice": "Deterministic workflow seed expansion; result is a lead until read.",
-                })
-
-                if payload.get("status") == "ok":
-                    for match in payload.get("matches", []):
-                        matched_path = match.get("file_path")
-                        if not matched_path:
-                            continue
-                        known_paths.add(matched_path)
-                        known_locations.setdefault(matched_path, []).append(
-                            int(match.get("line_number") or 1)
-                        )
-
-            # Auto-read the strongest verified paths that directly match indexed
-            # workflow leads. This is still MCP evidence, not RAG evidence.
-            indexed_paths = [
-                comparable_path(item.get("file_path", ""))
-                for item in search_results[:10]
-                if item.get("file_path")
-            ]
-            auto_read_paths = []
-            for actual_path in sorted(known_paths):
-                cp = comparable_path(actual_path)
-                if cp in indexed_paths:
-                    auto_read_paths.append(actual_path)
-
-            for actual_path in auto_read_paths[:5]:
-                starts = known_locations.get(actual_path, [1])
-                start_line = max(1, min(starts) - 12)
-                args = {
-                    "file_path": actual_path,
-                    "start_line": start_line,
-                    "end_line": start_line + 119,
-                }
-                call_key = "read_file" + json.dumps(args, sort_keys=True)
-                if call_key in completed_calls:
-                    continue
-                completed_calls.add(call_key)
-                try:
-                    read_result = await mcp_client.call_tool("read_file", args)
-                except Exception:
-                    continue
-
-                payload = read_result.structured_content
-                if not isinstance(payload, dict):
-                    raw_read = "\n".join(
-                        block.text for block in read_result.content
-                        if getattr(block, "type", "") == "text"
-                    )
-                    payload = parse_json_object(raw_read)
-
-                if not isinstance(payload, dict) or payload.get("status") != "ok":
-                    continue
-
-                transcript.append({
-                    "tool": "read_file",
-                    "arguments": args,
-                    "result": payload,
-                    "notice": "Auto-read verified workflow lead before planner conclusion.",
-                })
-
-                path = payload["file_path"]
-                source_text = "\n".join(
-                    re.sub(r"^\d+: ", "", line)
-                    for line in payload["content"].splitlines()
-                )
-                evidence.append({
-                    "chunk_id": f"MCP-{len(evidence) + 1}",
-                    "distance": None,
-                    "project": "frontend" if path.startswith("Shipra.Frontend/") else "backend",
-                    "source_type": "actual_code",
-                    "file_path": path,
-                    "section": "Source read through MCP",
-                    "symbol": None,
-                    "implementation_status": "unknown",
-                    "frontend_reachable": None,
-                    "frontend_inbound_references": 0,
-                    "matched_identifiers": [],
-                    "start_line": payload["start_line"],
-                    "end_line": payload["end_line"],
-                    "text": source_text,
-                })
-
-        for _ in range(18):
+        for _ in range(12):
             try:
                 response = await asyncio.to_thread(
                     client.models.generate_content,
@@ -4760,9 +4690,19 @@ def build_verified_evidence_gap_answer(question):
 
 
 
+# Shipra business-level order status groups.
+# "pending" is a business bucket containing these internal order statuses.
+# Asking for an exact internal status such as "assigned" remains exact.
+ORDER_STATUS_GROUPS = {
+    "pending": {"pending", "ready for assignment", "assigned"},
+}
+
+
 def _normalize_order_status(value):
-    """Normalize order-status text without merging different business concepts."""
-    text = str(value or "").strip().casefold().replace("_", " ").replace("-", " ")
+    """Normalize Shipra order-status text for deterministic comparison."""
+    raw = str(value or "").strip()
+    raw = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", raw)
+    text = raw.casefold().replace("_", " ").replace("-", " ")
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -4793,7 +4733,8 @@ def detect_order_count_status(question):
         return None
     if not any(re.search(pattern, text) for pattern in (
         r"\bhow\s+many\b", r"\bcount\b", r"\bnumber\s+of\b", r"\btotal\b",
-        r"\bkitn[ae]\b",
+        r"\bkitn(?:a|e|i|y|ay|ey)\b",
+        r"\bkitnay\b", r"\bkitney\b", r"\bkitni\b", r"\bkitny\b",
     )):
         return None
 
@@ -4806,13 +4747,13 @@ def detect_order_count_status(question):
         ("ready for assignment", ("ready for assignment", "readyforassignment")),
         ("out for delivery", ("out for delivery", "outfordelivery")),
         ("not delivered", ("not delivered", "undelivered")),
-        ("delivered", ("delivered",)),
-        ("pending", ("pending",)),
+        ("delivered", ("delivered", "deliverd", "delievered", "dilevered")),
+        ("pending", ("pending", "pendng", "panding")),
         ("queued", ("queued", "queue")),
         ("cancelled", ("cancelled", "canceled")),
         ("returned", ("returned", "return")),
         ("failed", ("failed", "failure")),
-        ("assigned", ("assigned",)),
+        ("assigned", ("assigned", "assignd")),
         ("unassigned", ("unassigned", "not assigned")),
         ("confirmed", ("confirmed",)),
         ("processing", ("processing", "in process")),
@@ -4854,93 +4795,80 @@ def _load_local_verified_orders():
 
 def _filter_orders_for_status(orders, wanted_status):
     wanted = _normalize_order_status(wanted_status)
+    allowed_statuses = ORDER_STATUS_GROUPS.get(wanted, {wanted})
     output = []
     for order in orders or []:
         if not isinstance(order, dict):
             continue
         current = _normalize_order_status(_order_status_from_record(order))
-        if current == wanted:
+        if current in allowed_statuses:
             output.append(order)
     return output
 
 
 async def get_verified_order_status_count(status_key):
-    """MCP-first status lookup, validated against returned records, with file fallback."""
+    """Single deterministic path for every order-status count query."""
     wanted_status = str(status_key or "").strip()
     if not wanted_status:
         return None
 
-    # Ask MCP for ALL mock orders, then filter deterministically here. This avoids
-    # server-side schema/alias mismatches such as status vs orderStatusName.
-    mcp_orders = None
-    mcp_file_path = None
+    # Use the dedicated MCP status tool. The server loads the complete orders.json
+    # and applies the same normalization to every status; an empty match is valid
+    # only when the server confirms how many source records it checked.
     try:
         params = get_mcp_server_params()
         async with asyncio.timeout(30):
             async with Client(params) as mcp_client:
                 result = await mcp_client.call_tool(
-                    "search_mock_orders",
-                    {
-                        "labels": None,
-                        "payment_method": None,
-                        "status": None,
-                        "exclude_status": None,
-                        "carrier": None,
-                    },
+                    "get_orders_by_status",
+                    {"status": wanted_status},
                 )
         if not getattr(result, "is_error", False):
             payload = _extract_mcp_payload(result)
             for _ in range(5):
                 if not isinstance(payload, dict):
                     break
-                if payload.get("status") == "ok" or "orders" in payload or "matches" in payload:
+                if payload.get("status") == "ok" and "orders" in payload:
                     break
                 child = next((payload.get(k) for k in ("result", "data", "content", "value") if isinstance(payload.get(k), dict)), None)
                 if child is None:
                     break
                 payload = child
-            if isinstance(payload, dict) and payload.get("status") == "ok":
-                candidate = payload.get("orders")
-                if candidate is None:
-                    candidate = payload.get("matches")
-                if isinstance(candidate, dict):
-                    candidate = [candidate]
-                if isinstance(candidate, list):
-                    mcp_orders = [x for x in candidate if isinstance(x, dict)]
-                    mcp_file_path = payload.get("resolved_path") or payload.get("file_path")
+            if (
+                isinstance(payload, dict)
+                and payload.get("status") == "ok"
+                and isinstance(payload.get("orders"), list)
+                and isinstance(payload.get("total_records_checked"), int)
+            ):
+                orders = [x for x in payload["orders"] if isinstance(x, dict)]
+                return {
+                    "count": len(orders),
+                    "status_key": _normalize_order_status(wanted_status).replace(" ", "_"),
+                    "status_label": wanted_status,
+                    "orders": orders,
+                    "data_source": "mcp_mock",
+                    "file_path": payload.get("resolved_path") or payload.get("file_path") or "mock-data/orders.json",
+                    "total_records_checked": payload["total_records_checked"],
+                }
     except Exception:
-        mcp_orders = None
+        pass
 
-    # If MCP supplied records, they are the primary source. Filter locally using
-    # all supported status field aliases so Pending/Delivered/etc. cannot be lost.
-    if mcp_orders:
-        matches = _filter_orders_for_status(mcp_orders, wanted_status)
-        return {
-            "count": len(matches),
-            "status_key": _normalize_order_status(wanted_status).replace(" ", "_"),
-            "status_label": wanted_status,
-            "orders": matches,
-            "data_source": "mcp_mock",
-            "file_path": mcp_file_path or "mock-data/orders.json",
-            "total_records_checked": len(mcp_orders),
-        }
-
-    # A zero/empty MCP dataset is not accepted as proof of zero. Read the exact
-    # deployed orders.json as a deterministic fallback and calculate again.
+    # Deployment-safe fallback: calculate from the exact local JSON. A missing or
+    # unreadable file is NOT converted into zero.
     local_orders, local_path = _load_local_verified_orders()
-    if local_orders is not None:
-        matches = _filter_orders_for_status(local_orders, wanted_status)
-        return {
-            "count": len(matches),
-            "status_key": _normalize_order_status(wanted_status).replace(" ", "_"),
-            "status_label": wanted_status,
-            "orders": matches,
-            "data_source": "local_verified_mock_fallback",
-            "file_path": local_path or "mock-data/orders.json",
-            "total_records_checked": len(local_orders),
-        }
+    if local_orders is None:
+        return None
+    matches = _filter_orders_for_status(local_orders, wanted_status)
+    return {
+        "count": len(matches),
+        "status_key": _normalize_order_status(wanted_status).replace(" ", "_"),
+        "status_label": wanted_status,
+        "orders": matches,
+        "data_source": "local_verified_mock_fallback",
+        "file_path": local_path or "mock-data/orders.json",
+        "total_records_checked": len(local_orders),
+    }
 
-    return None
 
 def _first_order_value(record, *names):
     """Pick the first non-empty value across common mock-order field aliases."""
@@ -5880,6 +5808,34 @@ for conversation in list_conversations():
         with st.popover("⋮"):
             st.caption(label)
 
+            is_pinned = bool(conversation.get("is_pinned"))
+            if st.button(
+                "Unpin chat" if is_pinned else "Pin chat",
+                key=f"pin_chat_{conversation_id}",
+                use_container_width=True,
+            ):
+                set_conversation_pinned(conversation_id, not is_pinned)
+                st.rerun()
+
+            new_title = st.text_input(
+                "Edit conversation name",
+                value=label,
+                key=f"edit_title_{conversation_id}",
+                label_visibility="collapsed",
+                placeholder="Conversation name",
+            )
+            if st.button(
+                "Save name",
+                key=f"save_title_{conversation_id}",
+                use_container_width=True,
+            ):
+                cleaned_title = re.sub(r"\s+", " ", new_title).strip()
+                if not cleaned_title:
+                    st.warning("Conversation name cannot be empty.")
+                else:
+                    rename_conversation(conversation_id, cleaned_title)
+                    st.rerun()
+
             if st.button(
                 "Delete chat",
                 key=f"delete_chat_{conversation_id}",
@@ -5906,8 +5862,74 @@ for conversation in list_conversations():
                 st.rerun()
 
 
+
+def render_message_copy_button(content, key, align="left"):
+    """Render a compact ChatGPT-style copy action immediately below a message."""
+    safe_text = html.escape(str(content or ""), quote=True)
+    safe_key = re.sub(r"[^a-zA-Z0-9_-]", "_", str(key))
+    justify = "flex-end" if align == "right" else "flex-start"
+
+    st.components.v1.html(
+        f"""
+        <div style="
+            height:24px;
+            display:flex;
+            justify-content:{justify};
+            align-items:flex-start;
+            margin-top:-2px;
+            margin-bottom:4px;
+            padding:0;
+        ">
+          <button
+            id="copy-{safe_key}"
+            title="Copy"
+            aria-label="Copy message"
+            onclick="copyMessage_{safe_key}()"
+            style="
+              width:28px;
+              height:24px;
+              display:inline-flex;
+              align-items:center;
+              justify-content:center;
+              padding:0;
+              margin:0;
+              border:0;
+              border-radius:6px;
+              background:transparent;
+              color:#9b9b9b;
+              cursor:pointer;
+            "
+            onmouseover="this.style.background='rgba(255,255,255,0.07)';this.style.color='#d6d6d6';"
+            onmouseout="this.style.background='transparent';this.style.color='#9b9b9b';"
+          >
+            <span id="copy-icon-{safe_key}" style="font-size:16px;line-height:1;">⧉</span>
+          </button>
+        </div>
+        <textarea id="copy-text-{safe_key}" style="display:none;">{safe_text}</textarea>
+        <script>
+          async function copyMessage_{safe_key}() {{
+            const text = document.getElementById("copy-text-{safe_key}").value;
+            const icon = document.getElementById("copy-icon-{safe_key}");
+            try {{
+              await navigator.clipboard.writeText(text);
+            }} catch (err) {{
+              const area = document.getElementById("copy-text-{safe_key}");
+              area.style.display = "block";
+              area.select();
+              document.execCommand("copy");
+              area.style.display = "none";
+            }}
+            icon.textContent = "✓";
+            setTimeout(() => icon.textContent = "⧉", 1200);
+          }}
+        </script>
+        """,
+        height=28,
+    )
+
+
 # Render the selected conversation above the sticky composer.
-for message in st.session_state["chat_history"]:
+for message_index, message in enumerate(st.session_state["chat_history"]):
     if message["role"] == "user":
         safe_user_text = html.escape(
             str(message["content"])
@@ -5923,12 +5945,21 @@ for message in st.session_state["chat_history"]:
             """,
             unsafe_allow_html=True,
         )
+        render_message_copy_button(
+            message["content"],
+            f"history_user_{message_index}",
+            align="right",
+        )
     else:
         with st.chat_message(
             "assistant",
             avatar=":material/auto_awesome:",
         ):
             st.markdown(message["content"])
+            render_message_copy_button(
+                message["content"],
+                f"history_assistant_{message_index}",
+            )
 
 
 # Native Streamlit chat input stays pinned to the bottom of the viewport.
@@ -5962,6 +5993,11 @@ if question:
         """,
         unsafe_allow_html=True,
     )
+    render_message_copy_button(
+        question,
+        "live_user_message",
+        align="right",
+    )
 
     with st.chat_message(
         "assistant",
@@ -5978,6 +6014,10 @@ if question:
                 st.stop()
 
         st.markdown(answer)
+        render_message_copy_button(
+            answer,
+            "live_assistant_message",
+        )
 
         if sources:
             with st.expander("Sources"):
