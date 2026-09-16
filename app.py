@@ -1,4 +1,5 @@
 import os
+SHIPRA_ROUTER_VERSION = "v7-agentic"
 import sys
 import json
 import math
@@ -14,9 +15,10 @@ from collections import Counter, defaultdict
 
 import faiss
 import streamlit as st
-from google import genai
+from groq import Groq
 from sentence_transformers import SentenceTransformer
 from supabase import create_client, Client as SupabaseClient
+import unicodedata
 
 
 
@@ -1135,8 +1137,49 @@ st.markdown(
 )
 
 
-GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-client = genai.Client(api_key=GEMINI_API_KEY)
+GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+
+# Groq model configuration
+PRIMARY_MODEL = "openai/gpt-oss-20b"
+FALLBACK_MODEL = "llama-3.1-8b-instant"
+
+
+class _GroqTextResponse:
+    """Small compatibility wrapper so the existing app can keep using response.text."""
+    def __init__(self, text):
+        self.text = text or ""
+
+
+class _GroqModelsAdapter:
+    """Expose the existing generate_content interface backed by Groq chat completions."""
+    def __init__(self, groq_client):
+        self._client = groq_client
+
+    def generate_content(self, model, contents, config=None):
+        # `config` is accepted for compatibility with the existing call sites.
+        # Groq request timeout/retry behavior is configured on the client itself.
+        response = self._client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": str(contents)}],
+            temperature=0.1,
+        )
+        text = ""
+        if response.choices:
+            text = response.choices[0].message.content or ""
+        return _GroqTextResponse(text)
+
+
+class _GroqClientAdapter:
+    def __init__(self, api_key):
+        groq_client = Groq(
+            api_key=api_key,
+            timeout=20.0,
+            max_retries=0,
+        )
+        self.models = _GroqModelsAdapter(groq_client)
+
+
+client = _GroqClientAdapter(GROQ_API_KEY)
 def get_mcp_server_params():
     """
     Build MCP stdio launch parameters without any machine-specific Windows path.
@@ -2671,10 +2714,565 @@ def get_previous_user_question():
     return ""
 
 
+def _normalize_intent_text(value):
+    """Normalize English, Urdu-script and noisy Roman-Urdu for intent routing."""
+    q = unicodedata.normalize("NFKC", str(value or "")).lower()
+    q = re.sub(r"[_/\\|]+", " ", q)
+    q = re.sub(r"[^\w\s\u0600-\u06ff'-]", " ", q, flags=re.UNICODE)
+    q = re.sub(r"\s+", " ", q).strip()
+    substitutions = (
+        (r"\b(?:mjhy|mujhy|mujhe|muje|mje)\b", " mujhe "),
+        (r"\b(?:meny|maine|mainay|meine)\b", " maine "),
+        (r"\b(?:krna|karna|krny|karne|karny|kru|karoon|karon|kro|karo)\b", " karna "),
+        (r"\b(?:kesy|kaise|kaisay|kese|kis tarah|kis trah|kistarah)\b", " kaise "),
+        (r"\b(?:konsy|konse|konsi|kon si|kon c|kaunse|kaunsi)\b", " kaunse "),
+        (r"\b(?:kam|kaam)\b", " kaam "),
+        (r"\b(?:bnao|banao|banana|banani|banane)\b", " banana "),
+        (r"\b(?:featuer|feautre|feture|feature)\b", " feature "),
+        (r"\b(?:layer|layers|leyer|leyers)\b", " layers "),
+        (r"\b(?:step|steps|stpes)\b", " steps "),
+    )
+    for pattern, repl in substitutions:
+        q = re.sub(pattern, repl, q, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", q).strip()
+
+
+def is_architecture_question(question):
+    """Route architecture/new-feature DEVELOPMENT guidance, not end-user workflows."""
+    q = _normalize_intent_text(question)
+
+    structure_signals = (
+        "architecture", "project structure", "codebase structure", "folder structure",
+        "which layers", "what layers", "kaunse layers", "kin layers",
+        "layers mein", "layers me", "frontend backend", "backend frontend",
+        "where to make changes", "where should i make changes", "where do i make changes",
+        "which files", "what files", "which folders", "what folders",
+        "where in the code", "kahan change", "kahan changes", "kidhar change",
+        "kin files", "kaunse files", "kin folders",
+        "کن لیئر", "کون سی لیئر", "کونسی لیئر", "پروجیکٹ اسٹرکچر",
+        "آرکیٹیکچر", "کن فائل", "کون سی فائل",
+    )
+    if any(s in q for s in structure_signals):
+        return True
+
+    feature_word = ("feature" in q) or ("فیچر" in q)
+    development_word = any(s in q for s in (
+        "add", "adding", "implement", "implementing", "develop", "developing",
+        "development", "create", "creating", "build", "building", "banana",
+        "introduce", "introducing", "extend", "extending", "new feature",
+        "نیا", "نئی", "شامل", "بنانا", "بناؤں", "امپلیمنٹ", "ڈیولپ", "تبدیل",
+    ))
+    has_feature = feature_word and development_word
+
+    guidance_signals = (
+        "how do i", "how can i", "how should i", "how to",
+        "what steps", "which steps", "steps chahiye", "steps lena",
+        "kaise karna", "kaise feature", "kaise add", "kaise implement",
+        "kaunse steps", "kya steps", "process", "guide me", "guide karo",
+        "what do i need", "what needs to change", "what should i change",
+        "which parts", "what parts", "kya karna", "kya changes",
+        "kin jagah", "kahan kahan", "kaam karna par", "kaam karna hoga",
+        "kaam karna pare", "کیسے", "کیا سٹیپس", "کون سے سٹیپس",
+        "کیا کرنا", "کہاں تبدیلی", "کن جگہ", "گائیڈ",
+    )
+    has_guidance = any(s in q for s in guidance_signals)
+    question_form = (
+        "?" in str(question or "")
+        or bool(re.search(r"\b(?:how|what|which|where|kaise|kya|kaunse|kin|kahan)\b", q))
+        or any(x in q for x in ("کیسے", "کیا", "کون", "کہاں"))
+    )
+    return bool(has_feature and (has_guidance or question_form))
+
+
+
+def is_codebase_location_question(question):
+    """
+    Detect requests asking WHERE a project concept/class/service/config/function
+    is defined, implemented, registered, configured, or used.
+    Supports English, Roman Urdu, Urdu script, filenames and symbols.
+    """
+    raw = str(question or "").strip()
+    q = _normalize_intent_text(raw)
+
+    location_signals = (
+        "where is", "where are", "where do", "where does", "which file",
+        "what file", "which folder", "what folder", "location of",
+        "defined where", "implemented where", "registered where",
+        "configured where", "where configured", "where registered",
+        "where implemented", "where defined", "where used",
+        "kis jaga", "kis jagah", "kahan", "kidhar", "kon si file",
+        "kaunse file", "kaunse files", "kis file", "kin files",
+        "kis folder", "kin folders", "kahan para", "kahan pada",
+        "kahan hai", "kidhar hai", "location bata", "jaga bata",
+        "کہاں", "کس جگہ", "کس فائل", "کون سی فائل", "کن فائل",
+        "کس فولڈر", "لوکیشن",
+    )
+    code_signals = (
+        "dependency injection", " di ", "service", "repository", "controller",
+        "handler", "validator", "command", "query", "endpoint", "api",
+        "authentication", "authorization", "jwt", "stripe", "config",
+        "configuration", "middleware", "database", "dbcontext", "entity",
+        "model", "enum", "class", "function", "method", "component", "page",
+        "modal", "route", "axios", "interface", "implementation", "registration",
+        "setting", "helper", "extension", "factory", "feature", "code",
+        ".cs", ".js", ".jsx", ".ts", ".tsx", ".py", ".json", ".sql",
+        "ڈیپنڈنسی", "سروس", "ریپوزٹری", "کنٹرولر", "فائل", "کوڈ",
+    )
+
+    has_location = any(s in q for s in location_signals)
+    has_code_subject = any(s in f" {q} " for s in code_signals)
+
+    # A named source symbol/file + location wording is always a codebase lookup.
+    named_file = bool(re.search(
+        r"\b[A-Za-z0-9_.-]+\.(?:js|jsx|ts|tsx|cs|py|json|sql|css|scss|html)\b",
+        raw, flags=re.IGNORECASE
+    ))
+    symbolish = bool(re.search(
+        r"\b(?:[A-Z][A-Za-z0-9_]{2,}|[A-Za-z0-9_]+(?:Command|Handler|Repository|Controller|Service|Validator|Extensions|Modal|Page))\b",
+        raw
+    ))
+
+    return bool(has_location and (has_code_subject or named_file or symbolish))
+
+
+def get_codebase_lookup_queries(question):
+    """Generate bounded literal MCP searches for code-location questions."""
+    raw = str(question or "").strip()
+    q = _normalize_intent_text(raw)
+    queries = []
+
+    def add(*vals):
+        for v in vals:
+            v = str(v or "").strip()
+            if len(v) >= 2 and v.lower() not in {x.lower() for x in queries}:
+                queries.append(v)
+
+    # Strong aliases for common cross-cutting concepts.
+    alias_groups = (
+        (("dependency injection", " di "), (
+            "ServiceCollectionExtensions", "IServiceCollection", "AddScoped",
+            "AddTransient", "AddSingleton", "InstallApplicationServices",
+            "AuthenticationExtensions"
+        )),
+        (("authentication", "jwt"), (
+            "AuthenticationExtensions", "AddAuthentication", "AddJwtBearer",
+            "TokenValidationParameters"
+        )),
+        (("database", "dbcontext"), ("DbContext", "ConnectionString", "Repository")),
+        (("stripe", "payment"), ("CheckoutForm", "Payment.js", "loadStripe")),
+        (("repository",), ("Repository", "IRepository")),
+        (("controller", "endpoint", "api"), ("Controller", "HttpGet", "HttpPost")),
+    )
+    padded = f" {q} "
+    for needles, aliases in alias_groups:
+        if any(n in padded for n in needles):
+            add(*aliases)
+
+    # Preserve explicit filenames and likely C#/JS symbols.
+    add(*extract_named_source_files(raw))
+    symbols = re.findall(
+        r"\b[A-Za-z_][A-Za-z0-9_]*(?:Command|Handler|Repository|Controller|Service|Validator|Extensions|Modal|Page|Context)\b",
+        raw
+    )
+    add(*symbols)
+
+    # Strip question/location filler and search the remaining concept literally.
+    concept = q
+    fillers = (
+        "where is", "where are", "where do", "where does", "which file",
+        "what file", "which folder", "what folder", "location of",
+        "kis jaga", "kis jagah", "kahan", "kidhar", "kis file",
+        "kon si file", "kaunse file", "kin files", "kis folder",
+        "kahan para hua hai", "kahan para", "kahan hai", "location bata",
+        "jaga bata", "کہاں", "کس جگہ", "کس فائل", "کون سی فائل",
+        "کن فائل", "کس فولڈر", "لوکیشن",
+    )
+    for f in fillers:
+        concept = concept.replace(f, " ")
+    concept = re.sub(
+        r"\b(?:shipra|project|codebase|mujhe|mujhy|batao|bata|please|hai|hain|ka|ki|ke|mein|me)\b",
+        " ", concept
+    )
+    concept = re.sub(r"\s+", " ", concept).strip(" ?")
+    add(concept)
+
+    return queries[:8]
+
+
+
+def normalize_business_status_semantically(question):
+    """
+    Normalize natural business-status paraphrases without requiring one exact wording.
+    Returns only canonical status labels used for routing; never returns business data.
+    """
+    q = _normalize_intent_text(question)
+
+    semantic_statuses = {
+        "delivered": (
+            "delivered", "deliver ho", "customer ko pohanch", "customer tak pohanch",
+            "customer ko mil", "customer tak mil", "receive ho", "received by customer",
+            "reached customer", "reached the customer", "successfully delivered",
+            "pohanchne wale", "pohanch gaye", "pohanch gay", "pohanch chuk",
+            "mil chuke", "mil gay", "mil gaye", "موصول", "پہنچ", "ڈیلیور",
+        ),
+        "pending": (
+            "pending", "baqi", "remaining", "not completed", "not delivered yet",
+            "abhi tak nahi", "reh gaye", "reh gay", "باقی", "پینڈنگ",
+        ),
+        "cancelled": ("cancelled", "canceled", "cancel ho", "منسوخ", "کینسل"),
+        "returned": ("returned", "return ho", "wapas", "واپس", "ریٹرن"),
+        "shipped": ("shipped", "dispatch", "dispatched", "bhej diye", "bhej dia", "روانہ"),
+        "processing": ("processing", "in process", "process me", "process mein"),
+        "completed": ("completed", "complete ho", "mukammal", "مکمل"),
+        "paid": ("paid", "payment received", "paisa mil", "ادا"),
+        "unpaid": ("unpaid", "payment pending", "paisa nahi", "بقایا"),
+    }
+    for status, phrases in semantic_statuses.items():
+        if any(p in q for p in phrases):
+            return status
+    return None
+
+def is_data_aggregate_question(question):
+    """
+    Universal detector for factual aggregate questions over Shipra business data.
+    Covers English, Roman Urdu, Urdu script, code-switching, common spelling variants.
+    Examples: how many orders are delivered, kitny pending hain, total returns?,
+    delivered orders count, کتنے آرڈرز ڈیلیور ہو گئے ہیں؟
+    """
+    raw = str(question or "").strip()
+    q = _normalize_intent_text(raw)
+    padded = f" {q} "
+
+    count_signals = (
+        "how many", "count", "total", "number of", "no of", "no. of",
+        "kitny", "kitne", "kitni", "kitnay", "kitna", "kity",
+        "kinti", "ktny", "ktny", "ginti", "tadaad", "taadad",
+        "کتنے", "کتنی", "تعداد", "کل",
+    )
+    business_entities = (
+        "order", "orders", "return", "returns", "shipment", "shipments",
+        "product", "products", "inventory", "inventories", "customer", "customers",
+        "invoice", "invoices", "payment", "payments", "parcel", "parcels",
+        "sale", "sales", "delivery", "deliveries", "stock", "stocks",
+        " آرڈر", " آرڈرز", " ریٹرن", " شپمنٹ", " پروڈکٹ", " انوینٹری",
+        " کسٹمر", " انوائس", " پیمنٹ", " پارسل", " سیل",
+    )
+    status_signals = (
+        "delivered", "deliver", "delivery", "deliverd", "delivred",
+        "pending", "pendng", "processing", "processed", "cancelled", "canceled",
+        "cancel", "returned", "return", "approved", "rejected", "failed",
+        "completed", "complete", "created", "shipped", "dispatch", "dispatched",
+        "fulfilled", "unfulfilled", "paid", "unpaid", "active", "inactive",
+        "deliver ho", "deliver hog", "deliver hu", "delivered ho",
+        "ho gay", "ho gye", "ho gae", "ho chuk", "reh gay", "baqi",
+        "ڈیلیور", "پینڈنگ", "کینسل", "ریٹرن", "مکمل", "باقی",
+    )
+
+    has_count = any(s in q for s in count_signals)
+    has_entity = any(s in padded for s in business_entities)
+    semantic_status = normalize_business_status_semantically(raw)
+    has_status = any(s in q for s in status_signals) or bool(semantic_status)
+
+    # Explicit count + business entity is sufficient; status is optional.
+    # Also catch natural interrogative morphology such as "orders kitne hain?"
+    roman_count = bool(re.search(r"\b(?:kitn\w*|ktn\w*)\b", q))
+    english_count = bool(re.search(r"\b(?:how many|count|total|number of)\b", q))
+    urdu_count = any(x in q for x in ("کتنے", "کتنی", "تعداد", "کل"))
+
+    if (has_count or roman_count or english_count or urdu_count) and has_entity:
+        return True
+
+    # Natural shorthand: "delivered orders?" / "pending kitny?".
+    shorthand_count = bool(re.search(
+        r"\b(?:delivered|pending|cancelled|canceled|returned|processing|shipped|paid|unpaid)\b.*\b(?:kitn\w*|count|total)\b"
+        r"|\b(?:kitn\w*|count|total)\b.*\b(?:delivered|pending|cancelled|canceled|returned|processing|shipped|paid|unpaid)\b",
+        q
+    ))
+    return bool(shorthand_count and (has_entity or has_status))
+
+
+def get_data_query_contract(question):
+    """Extract a conservative entity/status contract without inventing DB schema."""
+    q = _normalize_intent_text(question)
+    entity_aliases = {
+        "orders": ("order", "orders", " آرڈر", " آرڈرز"),
+        "returns": ("return", "returns", " ریٹرن"),
+        "shipments": ("shipment", "shipments", "parcel", "parcels", " شپمنٹ", " پارسل"),
+        "products": ("product", "products", " پروڈکٹ"),
+        "inventory": ("inventory", "inventories", "stock", "stocks", " انوینٹری"),
+        "customers": ("customer", "customers", " کسٹمر"),
+        "invoices": ("invoice", "invoices", " انوائس"),
+        "payments": ("payment", "payments", " پیمنٹ"),
+        "sales": ("sale", "sales", " سیل"),
+    }
+    status_aliases = {
+        "delivered": ("delivered", "deliverd", "delivred", "deliver ho", "deliver hog", "deliver hu", "ڈیلیور"),
+        "pending": ("pending", "pendng", "baqi", "reh gay", "پینڈنگ", "باقی"),
+        "cancelled": ("cancelled", "canceled", "cancel", "کینسل"),
+        "returned": ("returned", "return ho", "ریٹرن"),
+        "processing": ("processing", "processed"),
+        "completed": ("completed", "complete", "mukamal", "مکمل"),
+        "shipped": ("shipped", "dispatch", "dispatched"),
+        "approved": ("approved",),
+        "rejected": ("rejected",),
+        "failed": ("failed",),
+        "paid": ("paid",),
+        "unpaid": ("unpaid",),
+        "active": ("active",),
+        "inactive": ("inactive",),
+    }
+    entity = next((name for name, aliases in entity_aliases.items() if any(a in q for a in aliases)), None)
+    status = normalize_business_status_semantically(question)
+    if not status:
+        status = next((name for name, aliases in status_aliases.items() if any(a in q for a in aliases)), None)
+    return {"entity": entity, "status": status, "operation": "count"}
+
+
+def build_data_query_answer(question, results):
+    """
+    Render factual aggregate results only from connected runtime/mock data evidence.
+    Never turn a data question into a code workflow and never fabricate a count.
+    """
+    contract = get_data_query_contract(question)
+    entity = contract.get("entity") or "records"
+    status = contract.get("status")
+    roman = get_response_language(question) != "English"
+
+    # Prefer structured mock/runtime evidence already returned by the project pipeline.
+    answer = answer_from_mock_data(
+        question,
+        results,
+        get_response_language(question),
+    )
+    if answer:
+        return clean_assistant_display_text(answer)
+
+    # No count evidence: explicitly distinguish availability from project-code evidence.
+    if roman:
+        target = f"{status} {entity}".strip() if status else entity
+        return (
+            f"### Data Query\n\n"
+            f"`{target}` ka exact count current connected data evidence se verify nahi ho saka. "
+            "Main project code dekh kar live business-data count guess nahi karunga. "
+            "Live/read-only database ya relevant runtime dataset connected ho to isi query ka exact count return kiya ja sakta hai."
+        )
+    target = f"{status} {entity}".strip() if status else entity
+    return (
+        "### Data Query\n\n"
+        f"The exact count for `{target}` could not be verified from the currently connected data evidence. "
+        "I will not infer a live business-data count from source code. "
+        "With a connected read-only production database or relevant runtime dataset, this query can return the exact count."
+    )
+
+
+def _extract_json_object(text):
+    """Safely extract one JSON object from an LLM response."""
+    import json
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    try:
+        obj = json.loads(raw)
+        return obj if isinstance(obj, dict) else None
+    except Exception:
+        pass
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if not m:
+        return None
+    try:
+        obj = json.loads(m.group(0))
+        return obj if isinstance(obj, dict) else None
+    except Exception:
+        return None
+
+
+def semantic_route_with_groq(question):
+    """
+    LLM fallback router for wording not confidently handled by deterministic fast paths.
+    It classifies intent only; it never supplies Shipra facts or counts.
+    """
+    prompt = f"""
+You are an intent router for the Shipra project assistant.
+Understand English, Urdu, Roman Urdu, mixed language, typos, paraphrases, and informal wording.
+
+Return JSON ONLY:
+{{
+  "intent": "codebase_location|data_query|architecture_guidance|project_workflow|code_explanation|general",
+  "action": "locate|count|explain|guide|workflow|general",
+  "entity": "short subject or null",
+  "status": "status/filter or null",
+  "confidence": 0.0
+}}
+
+Rules:
+- Asking where code/config/class/function/service is located => codebase_location.
+- Asking count/total/how many of business records, optionally by status => data_query.
+- Understand outcome paraphrases semantically: e.g. "customer ko pohanchne wale orders" means delivered orders; do not require the literal word delivered.
+- Asking which layers/files/steps are needed to add/build a feature => architecture_guidance.
+- Asking how an existing Shipra feature/process works or is performed => project_workflow.
+- Asking why/what a specific code/file/function does => code_explanation.
+- Never invent project facts, file paths, database values, or counts.
+- Route by the user's intended meaning, not literal keywords.
+- A request for current/business values must use data_query even when the status is paraphrased.
+- A request about source structure/location/workflow must use project evidence.
+- If unclear, choose general with low confidence.
+
+User question:
+{question}
+""".strip()
+
+    try:
+        # Reuse the app's existing Groq wrapper so no second client/config is introduced.
+        raw = call_groq(prompt, temperature=0)
+    except TypeError:
+        try:
+            raw = call_groq(prompt)
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+    obj = _extract_json_object(raw)
+    if not obj:
+        return None
+
+    allowed = {
+        "codebase_location", "data_query", "architecture_guidance",
+        "project_workflow", "code_explanation", "general"
+    }
+    intent = str(obj.get("intent") or "").strip().lower()
+    if intent not in allowed:
+        return None
+    try:
+        confidence = float(obj.get("confidence", 0))
+    except Exception:
+        confidence = 0.0
+    obj["confidence"] = max(0.0, min(1.0, confidence))
+    return obj
+
+
+def get_hybrid_route(question):
+    """
+    Fast deterministic routes first; semantic LLM fallback only for unresolved wording.
+    This keeps common queries fast while generalizing to unseen phrasing.
+    """
+    raw = str(question or "").strip()
+
+    if is_data_aggregate_question(raw):
+        c = get_data_query_contract(raw)
+        return {"intent": "data_query", "action": "count",
+                "entity": c.get("entity"), "status": c.get("status"),
+                "confidence": 1.0, "source": "fast_path"}
+
+    if is_codebase_location_question(raw):
+        return {"intent": "codebase_location", "action": "locate",
+                "entity": raw, "status": None,
+                "confidence": 1.0, "source": "fast_path"}
+
+    if is_architecture_question(raw):
+        return {"intent": "architecture_guidance", "action": "guide",
+                "entity": raw, "status": None,
+                "confidence": 1.0, "source": "fast_path"}
+
+    semantic = semantic_route_with_groq(raw)
+    if semantic and semantic.get("confidence", 0) >= 0.68:
+        semantic["source"] = "semantic_router"
+        return semantic
+
+    return {"intent": "general", "action": "general",
+            "entity": raw, "status": None,
+            "confidence": float((semantic or {}).get("confidence", 0)),
+            "source": "fallback"}
+
+
+def _get_semantic_route_cache():
+    if "_shipra_semantic_route_cache" not in st.session_state:
+        st.session_state["_shipra_semantic_route_cache"] = {}
+    return st.session_state["_shipra_semantic_route_cache"]
+
+
+def get_cached_hybrid_route(question):
+    key = _normalize_intent_text(question)
+    cache = _get_semantic_route_cache()
+    if key in cache:
+        return cache[key]
+    route = get_hybrid_route(question)
+    cache[key] = route
+    while len(cache) > 100:
+        cache.pop(next(iter(cache)))
+    return route
+
+
+def resolve_authoritative_route(question):
+    """
+    Choose exactly one execution route for the request.
+    LLM is used for semantic understanding; MCP/runtime data remains the authority
+    for project facts and business values.
+    """
+    route = get_cached_hybrid_route(question)
+    intent = str(route.get("intent") or "general")
+
+    # Upgrade semantic data routes with canonical entity/status information.
+    if intent == "data_query":
+        contract = get_data_query_contract(question)
+        route = dict(route)
+        route["entity"] = contract.get("entity") or route.get("entity")
+        route["status"] = contract.get("status") or route.get("status")
+        route["action"] = route.get("action") or "count"
+
+    return route
+
+
+def route_requires_project_evidence(route):
+    return str((route or {}).get("intent")) in {
+        "codebase_location", "architecture_guidance",
+        "project_workflow", "code_explanation",
+    }
+
+
+def route_requires_runtime_data(route):
+    return str((route or {}).get("intent")) == "data_query"
+
 def detect_request_profile(question):
     """Deterministically identify Shipra scope, entity, action, and request mode."""
     raw = str(question or "").strip()
     lowered = raw.lower()
+    named_source_file = bool(re.search(r"\b[A-Za-z0-9_.-]+\.(?:js|jsx|ts|tsx|cs|py|json|sql|css|scss|html)\b", raw, flags=re.IGNORECASE))
+    explanation_request = any(p in lowered for p in (
+        "why using", "why use", "what does", "what is", "explain",
+        "purpose of", "used for", "use of", "working of", "kis liye", "kyun", "q use"
+    ))
+
+    # Business-data aggregate lookup: counts/totals/status questions are data queries,
+    # never Practical Scenario workflows.
+    if is_data_aggregate_question(raw):
+        contract = get_data_query_contract(raw)
+        return {
+            "scope": "data",
+            "mode": "data_query",
+            "action": "count",
+            "entity": contract.get("entity") or raw,
+            "status": contract.get("status"),
+        }
+
+    # Exact codebase-location lookup: "DI kahan hai?", "where is JWT configured?", etc.
+    if is_codebase_location_question(raw):
+        return {
+            "scope": "project",
+            "mode": PROJECT_EXISTING,
+            "action": "locate",
+            "entity": raw,
+        }
+
+    # Architecture/development-guidance questions describe how Shipra is structured.
+    # They are NOT end-user workflows and NOT requests to implement a feature right now.
+    if is_architecture_question(raw):
+        return {
+            "scope": "project",
+            "mode": PROJECT_EXISTING,
+            "action": "architecture",
+            "entity": "project architecture",
+        }
 
     prompt_words = (
         "generate prompt", "coding prompt", "prompt bana", "prompt banao",
@@ -2697,7 +3295,10 @@ def detect_request_profile(question):
     )
     explicit_code_change = any(
         phrase in lowered for phrase in explicit_change_phrases
-    )
+    ) or bool(re.search(
+        r"\b(?:add|implement|build|develop|create)\s+(?:(?:a|an)\s+)?(?:new\s+)?feature\b",
+        lowered,
+    ))
 
     entity_aliases = [
         ("return order", ("return order", "return orders", "returnorder")),
@@ -2756,7 +3357,7 @@ def detect_request_profile(question):
             action = canonical
             break
 
-    explicit_shipra = any(term in lowered for term in (
+    explicit_shipra = named_source_file or any(term in lowered for term in (
         "shipra", "frontend", "backend", "controller", "handler",
         "repository", "project", "app.py", "server.py", "api",
     ))
@@ -2775,7 +3376,7 @@ def detect_request_profile(question):
         "search", "find", "list", "show", "which", "export", "download",
         "upload", "import", "sync", "track", "validate", "open",
     )
-    operational_question = any(word in lowered for word in operational_words)
+    operational_question = explanation_request or named_source_file or any(word in lowered for word in operational_words)
 
     project_scope = explicit_shipra or (
         entity is not None
@@ -2795,9 +3396,29 @@ def detect_request_profile(question):
         return {
             "scope": "project",
             "mode": PROJECT_EXISTING,
-            "action": action,
+            "action": action or ("explain" if explanation_request else None),
             "entity": entity,
         }
+
+    # Semantic fallback for unseen English/Urdu/Roman-Urdu phrasing.
+    semantic = get_cached_hybrid_route(raw)
+    semantic_intent = semantic.get("intent")
+    if semantic.get("source") == "semantic_router":
+        if semantic_intent == "codebase_location":
+            return {"scope": "project", "mode": PROJECT_EXISTING, "action": "locate",
+                    "entity": semantic.get("entity") or raw}
+        if semantic_intent == "data_query":
+            return {"scope": "data", "mode": "data_query", "action": "count",
+                    "entity": semantic.get("entity") or raw, "status": semantic.get("status")}
+        if semantic_intent == "architecture_guidance":
+            return {"scope": "project", "mode": "architecture", "action": "guide",
+                    "entity": semantic.get("entity") or raw}
+        if semantic_intent == "code_explanation":
+            return {"scope": "project", "mode": PROJECT_EXISTING, "action": "explain",
+                    "entity": semantic.get("entity") or raw}
+        if semantic_intent == "project_workflow":
+            return {"scope": "project", "mode": PROJECT_EXISTING, "action": "workflow",
+                    "entity": semantic.get("entity") or raw}
 
     return {
         "scope": "general",
@@ -2808,7 +3429,7 @@ def detect_request_profile(question):
 
 
 def classify_question(question):
-    # Deterministic routing first. Gemini is only a fallback for ambiguous text.
+    # Deterministic routing first. Groq is only a fallback for ambiguous text.
     if re.search(r"\bORD-\d+\b", question, flags=re.IGNORECASE):
         return PROJECT_EXISTING
 
@@ -2873,9 +3494,8 @@ Latest question:
 """
 
     models_to_try = [
-        "gemini-3.5-flash-lite",
-        "gemini-3.6-flash",
-        "gemini-3.7-flash",
+        PRIMARY_MODEL,
+        FALLBACK_MODEL,
     ]
 
     for model_name in models_to_try:
@@ -2915,7 +3535,7 @@ Latest question:
 
 
 def filter_relevant_results(results, question):
-    """Drop weak semantic neighbors before they reach Gemini."""
+    """Drop weak semantic neighbors before they reach Groq."""
     generic_tokens = {
         "create", "connect", "update", "delete", "fetch", "validate",
         "frontend", "backend", "flow", "code", "file", "function",
@@ -2977,9 +3597,8 @@ Latest question:
 """
 
     models_to_try = [
-        "gemini-3.5-flash-lite",
-        "gemini-3.6-flash",
-        "gemini-3.7-flash",
+        PRIMARY_MODEL,
+        FALLBACK_MODEL,
     ]
     last_error = None
 
@@ -3030,6 +3649,28 @@ def get_mcp_seed_queries(question, search_results):
             value = str(value or "").strip()
             if len(value) >= 3 and value not in seeds:
                 seeds.append(value)
+
+    # Codebase-location questions need literal symbol/concept searches first.
+    if is_codebase_location_question(question):
+        add(*get_codebase_lookup_queries(question))
+
+    # Architecture questions need representative evidence across project layers,
+    # not a fake search for one feature workflow.
+    if is_architecture_question(question):
+        add(
+            "Shipra.Frontend src pages",
+            "AxiosInterceptors",
+            "Controllers",
+            "Features Commands Queries Handler Validator",
+            "Shipra.Backend.API.Core",
+            "Repository",
+            "DbContext",
+            "ServiceCollectionExtensions",
+        )
+
+    # Explicit filenames are hard retrieval targets and are searched first.
+    for named_file in extract_named_source_files(question):
+        add(named_file, named_file.rsplit(".", 1)[0])
 
     # Mock-data lookups: exact order ids and common labels should search live JSON too.
     order_ids = re.findall(r"\bORD-\d+\b", question, flags=re.IGNORECASE)
@@ -3138,6 +3779,47 @@ def get_mcp_seed_queries(question, search_results):
         for word in meaningful_words[:4]:
             add(word)
 
+    # Workflow questions need UI/action files, not only domain entities.
+    profile = detect_request_profile(question)
+    action = str(profile.get("action") or "").strip().lower()
+    workflow_actions = {
+        "create": "Create", "update": "Update", "delete": "Delete",
+        "assign": "Assign", "connect": "Connect", "sync": "Sync",
+        "import": "Import", "export": "Export",
+    }
+
+    if action in workflow_actions and meaningful_words:
+        action_words = {
+            "create", "add", "make", "new", "update", "edit", "change",
+            "delete", "remove", "assign", "connect", "sync", "import",
+            "export", "generate",
+        }
+        entity_words = [
+            word for word in meaningful_words
+            if word.lower() not in action_words
+        ][:4]
+
+        if entity_words:
+            variants = [entity_words]
+            singular = list(entity_words)
+            if singular[-1].lower().endswith("s") and len(singular[-1]) > 3:
+                singular[-1] = singular[-1][:-1]
+                variants.append(singular)
+
+            prefix = workflow_actions[action]
+            for words in variants:
+                entity_pascal = "".join(
+                    word[:1].upper() + word[1:] for word in words
+                )
+                add(
+                    entity_pascal,
+                    prefix + entity_pascal,
+                    entity_pascal + "Modal",
+                    prefix + entity_pascal + "Modal",
+                    entity_pascal + "Form",
+                    entity_pascal + "Page",
+                )
+
     # Reuse exact code identifiers already surfaced by indexed retrieval as
     # additional literal-search hints, without trusting those paths as live MCP evidence.
     for item in search_results[:6]:
@@ -3145,7 +3827,7 @@ def get_mcp_seed_queries(question, search_results):
         if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{4,}", symbol):
             add(symbol)
 
-    return seeds[:16]
+    return seeds[:24]
 
 
 def mcp_match_priority(file_path, seed_query, question):
@@ -3162,6 +3844,21 @@ def mcp_match_priority(file_path, seed_query, question):
     if query and query in path:
         score += 800
     score += 80 * len(topic_tokens.intersection(path_tokens))
+
+    # For workflow questions, prefer screens/modals/forms over domain entities.
+    workflow_question = detect_request_profile(question).get("action") in {
+        "create", "update", "delete", "assign", "connect",
+        "sync", "import", "export",
+    }
+    if workflow_question:
+        if "/src/components/" in path or "/src/pages/" in path:
+            score += 900
+        if any(x in path for x in ("modal", "form", "/list/", "index.js", "index.jsx", "index.tsx")):
+            score += 500
+        if "/api/" in path or "axiosinterceptors" in path:
+            score += 350
+        if "api.core/" in path or "/core/" in path:
+            score -= 650
 
     # Prefer executable layers over generic neighboring screens.
     if "/src/components/" in path or "/src/pages/" in path:
@@ -3295,6 +3992,141 @@ def prune_mcp_evidence(evidence, question, seed_queries):
     return output[:12]
 
 
+
+def extract_named_source_files(question):
+    return [m.group(0).lower() for m in re.finditer(
+        r"\b[A-Za-z0-9_.-]+\.(?:js|jsx|ts|tsx|cs|py|json|sql|css|scss|html)\b",
+        str(question or ""), flags=re.IGNORECASE)]
+
+def is_explanation_question(question):
+    q=str(question or "").lower()
+    if is_architecture_question(question):
+        return True
+    return bool(extract_named_source_files(question)) and any(p in q for p in (
+        "why", "what does", "what is", "explain", "purpose", "used for",
+        "use of", "working", "kis liye", "kyun", "q use"))
+
+
+def get_request_semantic_contract(question):
+    """Extract the user's required operation and distinctive entity concepts."""
+    profile = detect_request_profile(question)
+    lowered = str(question or "").lower()
+
+    action = profile.get("action")
+    action_terms = {
+        "create": {"create", "created", "creating", "add", "new", "generate", "save", "submit"},
+        "assign": {"assign", "assigned", "apply", "allocation", "allocate"},
+        "connect": {"connect", "connected", "connection", "link", "activate"},
+        "update": {"update", "updated", "edit", "change", "modify"},
+        "delete": {"delete", "deleted", "remove", "removed"},
+        "filter": {"filter", "search", "find"},
+        "list": {"list", "getall", "fetch", "show"},
+        "export": {"export", "csv", "excel", "download"},
+        "import": {"import", "upload"},
+        "sync": {"sync", "synchronize", "synchronise"},
+        "return": {"return", "returned"},
+        "track": {"track", "tracking"},
+        "validate": {"validate", "validation", "validator"},
+        "calculate": {"calculate", "calculator", "rate"},
+        "view": {"view", "details", "get", "fetch", "open"},
+    }
+
+    # Distinctive business nouns must survive retrieval. This prevents:
+    # "sale channel orders" -> "sale channel config" drift, and applies to
+    # other compound feature questions as well.
+    stop = {
+        "how", "what", "when", "where", "which", "who", "why",
+        "create", "add", "make", "update", "edit", "change", "delete",
+        "remove", "assign", "connect", "filter", "search", "find",
+        "list", "show", "export", "download", "import", "upload",
+        "sync", "track", "validate", "view", "open", "generate",
+        "shipra", "section", "page", "screen", "feature", "flow",
+        "the", "a", "an", "to", "of", "for", "in", "on", "with",
+        "is", "are", "do", "does", "can", "me", "my", "please",
+        "kesy", "kaise", "banao", "banana", "batao", "btao", "kro",
+        "karna", "hai", "hain", "ka", "ki", "ke", "ko", "mai",
+        "main", "mein", "sy", "se", "mjhy", "mujhe",
+    }
+    nouns = [
+        token for token in tokenize(lowered)
+        if token not in stop and len(token) >= 3
+    ]
+
+    # Preserve canonical compound entity words too.
+    entity = str(profile.get("entity") or "")
+    for token in tokenize(entity):
+        if token not in stop and token not in nouns:
+            nouns.append(token)
+
+    return {
+        "action": action,
+        "action_terms": action_terms.get(action, set()),
+        "concepts": nouns[:6],
+        "named_files": extract_named_source_files(question),
+    }
+
+
+def evidence_matches_request(item, question):
+    if item.get("source_type") == "mock_data":
+        return True
+
+    # Location lookup is evidence-by-symbol/path, not a create/update/delete workflow.
+    if is_codebase_location_question(question):
+        searchable = (
+            str(item.get("file_path") or "") + "\n" +
+            str(item.get("symbol") or "") + "\n" +
+            str(item.get("text") or "")
+        ).lower()
+        queries = get_codebase_lookup_queries(question)
+        return any(str(q).lower() in searchable for q in queries if len(str(q).strip()) >= 2)
+
+    contract=get_request_semantic_contract(question)
+    path=str(item.get("file_path") or "").replace("\\\\","/").lower()
+    body=str(item.get("text") or "").lower()
+    named=contract.get("named_files") or []
+    if named:
+        stems=[n.rsplit(".",1)[0] for n in named]
+        exact=any(path.endswith("/"+n) or path.endswith(n) for n in named)
+        direct=any(stem in body and any(k in body for k in ("import ","require(","from ")) for stem in stems)
+        return exact or direct
+    concepts=contract["concepts"]; action=contract["action"]; searchable=path+"\n"+str(item.get("symbol") or "").lower()+"\n"+body
+    tokens=tokenize(searchable)
+    if concepts:
+        matched={c for c in concepts if c in tokens or c in searchable}
+        required=1 if len(concepts)==1 else max(2,len(set(concepts))-1)
+        if len(matched)<required: return False
+        if re.search(r"\borders?\b",str(question or "").lower()) and "order" not in searchable: return False
+    markers={"create":("create","add","generate","save","submit","post"),"update":("update","edit","modify","patch","put"),"delete":("delete","remove"),"assign":("assign","apply","allocate"),"connect":("connect","connection","activate","link"),"sync":("sync","synchron"),"export":("export","csv","excel","download"),"import":("import","upload"),"filter":("filter","search"),"track":("track","tracking"),"validate":("validat",)}
+    if action in markers:
+        has_action=any(m in searchable for m in markers[action])
+        frontend="shipra.frontend/" in path and ("/pages/" in path or "/components/" in path)
+        if not has_action and not frontend: return False
+    return True
+
+def enforce_request_evidence_contract(results, question):
+    """Apply the entity+operation contract to all retrieved evidence."""
+    kept = [
+        item for item in (results or [])
+        if evidence_matches_request(item, question)
+    ]
+
+    # Stable de-duplication.
+    output = []
+    seen = set()
+    for item in kept:
+        key = (
+            item.get("file_path"),
+            item.get("start_line"),
+            item.get("end_line"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(item)
+
+    return output[:12]
+
+
 def proposed_implementation_is_incomplete(answer):
     """Reject placeholder-only proposed implementations before display."""
     marker = "#### Proposed implementation"
@@ -3370,6 +4202,15 @@ GLOBAL VERIFICATION RULES:
 - Indexed/RAG results are discovery hints only and never proof by themselves.
 - Never treat semantic similarity, a shared noun, or a similar filename as proof.
 - The requested entity AND requested operation must both match the verified code.
+- For compound requests, preserve every distinctive business concept from the
+  question. Example: "sale channel orders" requires evidence about orders in the
+  sale-channel workflow; SaleChannelConfig alone is not a match.
+- Configuration, settings, credentials, validators, and connection setup are
+  supporting evidence only when the requested workflow actually concerns them.
+- Before finishing, explicitly check: (1) entity match, (2) operation match,
+  (3) frontend evidence for UI questions. If any check fails, search again with
+  the missing concept instead of returning a neighboring feature.
+
 - Store and Store Channel are different entities.
 - Creating, assigning, updating, filtering, validating, syncing, uploading,
   exporting, returning, and deleting are different operations unless the code
@@ -3618,6 +4459,19 @@ Finish when sufficient verified evidence is collected or the exact search is exh
         # This prevents semantically similar but unrelated files from becoming the
         # only evidence when the question names a concrete operation.
         seed_queries = get_mcp_seed_queries(question, search_results)
+
+        # FAST + ACCURATE LOCATION MODE
+        if is_codebase_location_question(question):
+            location_queries = get_codebase_lookup_queries(question)
+            ordered = []
+            seen_queries = set()
+            for q in location_queries + seed_queries:
+                q = str(q or "").strip()
+                if q and q.lower() not in seen_queries:
+                    seen_queries.add(q.lower())
+                    ordered.append(q)
+            seed_queries = ordered[:4]
+
         bootstrap_matches = []
 
         for seed_query in seed_queries:
@@ -3697,8 +4551,9 @@ Finish when sufficient verified evidence is collected or the exact search is exh
         )
         bootstrap_paths_read = set()
 
+        bootstrap_read_limit = 4 if is_codebase_location_question(question) else 8
         for match in ranked_bootstrap:
-            if len(bootstrap_paths_read) >= 8:
+            if len(bootstrap_paths_read) >= bootstrap_read_limit:
                 break
 
             path = match["file_path"]
@@ -3786,12 +4641,16 @@ Finish when sufficient verified evidence is collected or the exact search is exh
                     "error": f"{type(read_error).__name__}: {read_error}",
                 })
 
+        # Verified location evidence is sufficient; skip expensive planner turns.
+        if is_codebase_location_question(question) and evidence:
+            return prune_mcp_evidence(evidence, question, seed_queries)
+
         planner_failures = 0
-        for _ in range(12):
+        for _ in range(7):
             try:
                 response = await asyncio.to_thread(
                     client.models.generate_content,
-                    model="gemini-3.5-flash-lite",
+                    model=PRIMARY_MODEL,
                     contents=(
                         instructions
                         + "\nINPUT AND TOOL RESULTS:\n"
@@ -4727,20 +5586,29 @@ def _order_status_from_record(record):
 
 
 def detect_order_count_status(question):
-    """Return the requested order status for direct count questions."""
+    """Detect Shipra order-status count questions, including short follow-ups."""
     text = _normalize_order_status(question)
-    if not re.search(r"\b(order|orders)\b", text):
-        return None
-    if not any(re.search(pattern, text) for pattern in (
+
+    # Count language is mandatory. The word "orders" is intentionally NOT
+    # mandatory because users naturally ask follow-ups such as
+    # "how many are pending?" or "kitne delivered hain?" inside Shipra.
+    count_patterns = (
         r"\bhow\s+many\b", r"\bcount\b", r"\bnumber\s+of\b", r"\btotal\b",
         r"\bkitn(?:a|e|i|y|ay|ey)\b",
         r"\bkitnay\b", r"\bkitney\b", r"\bkitni\b", r"\bkitny\b",
-    )):
+    )
+    if not any(re.search(pattern, text) for pattern in count_patterns):
         return None
 
     # COD pending is a receivables/payment concept, not the Pending order status.
     if re.search(r"\bcod\s+pending\b", text):
         return None
+
+    # First normalize natural outcome paraphrases ("customer ko pohanchne wale",
+    # "received by customer", etc.) into the canonical business status.
+    semantic_status = normalize_business_status_semantically(question)
+    if semantic_status:
+        return semantic_status
 
     aliases = (
         ("on the way", ("on the way", "ontheway", "in transit", "intransit")),
@@ -4965,7 +5833,1113 @@ def build_order_count_answer(status_result, response_language):
     return f"{heading}\n\nNo matching order records were found in the verified MCP mock data."
 
 
+
+def clean_assistant_display_text(answer):
+    """Remove internal/rendering artifacts without changing answer content."""
+    cleaned = str(answer or "")
+    cleaned = re.sub(
+        r"(?mi)^\s*(?:`{1,3})?st\.iframe(?:\([^\n]*\))?(?:`{1,3})?\s*$\n?",
+        "",
+        cleaned,
+    )
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def build_verified_mcp_fallback_answer(question, mcp_results):
+    """Build a question-specific fallback from verified MCP evidence only."""
+    architecture_answer = build_architecture_guidance_answer(question)
+    if architecture_answer is not None:
+        return architecture_answer
+
+    response_language = get_response_language(question)
+    results = list(mcp_results or [])
+
+    if is_explanation_question(question):
+        compatible=enforce_request_evidence_contract(results, question)
+        named=extract_named_source_files(question)
+        target=named[0] if named else "requested source file"
+        exact=[r for r in compatible if str(r.get("file_path") or "").lower().endswith(target)]
+        consumers=[r for r in compatible if r not in exact]
+        if not exact:
+            return f"### Purpose of `{target}`\nThe exact requested file was not verified in MCP source evidence, so its purpose will not be inferred from unrelated files."
+        ordered=exact+consumers
+        combined="\n".join(str(r.get("text") or "") for r in ordered).lower()
+        points=[]
+        if "usestripe" in combined or "createpaymentmethod" in combined:
+            points.append("It handles the Stripe card-payment form and creates a Stripe payment method from the entered card details.")
+        if "cardelement" in combined:
+            points.append("It uses Stripe's `CardElement` to collect card details through Stripe's payment UI component.")
+        if "paymentmethod.id" in combined:
+            points.append("After creation, it receives `paymentMethod.id`, which is intended for further payment processing.")
+        if any("payment.js" in str(r.get("file_path") or "").lower() for r in consumers):
+            points.append("`Payment.js` imports this file as `PaymentForm` and renders it inside Stripe's `<Elements>` provider, confirming where the form is used.")
+        if not points:
+            points.append("Its responsibility is described only from the exact verified source and direct importer shown below.")
+        parts=[f"### Why `{target}` is used"]+[f"- {x}" for x in points]+["","### Actual Project Code Flow"]
+        for r in ordered[:2]:
+            sn=extract_exact_snippet(r,question)
+            if not sn: continue
+            path=str(r.get("file_path") or "Unknown file"); lang=code_language(path)
+            if len(sn)>1800: sn=sn[:1800].rstrip()+"\n// ..."
+            heading=f"`{Path(path).name}`" if path.lower().endswith(target) else f"Where `{target}` is used"
+            parts += ["",f"#### {heading}",f"**File:** `{path}`","",f"```{lang}",sn,"```"]
+        return "\n".join(parts)
+
+    if not results:
+        if response_language == "Roman Urdu":
+            return (
+                "### Practical Scenario Guide\n"
+                "Verified frontend workflow evidence available nahi hai, is liye exact UI steps invent nahi kiye ja rahe.\n\n"
+                "**Expected Result:** Relevant verified source milne par exact workflow diya jayega.\n\n"
+                "### Actual Project Code Flow\n"
+                "MCP se relevant verified project evidence retrieve nahi hua."
+            )
+        return (
+            "### Practical Scenario Guide\n"
+            "Verified frontend workflow evidence is unavailable, so exact UI steps are not being invented.\n\n"
+            "**Expected Result:** The exact workflow can be provided when relevant verified evidence is available.\n\n"
+            "### Actual Project Code Flow\n"
+            "No relevant verified MCP project evidence was retrieved."
+        )
+
+    q = (question or "").lower()
+
+    if detect_request_profile(question).get("action") in {
+        "create", "update", "delete", "assign", "connect",
+        "sync", "import", "export",
+    }:
+        results = sorted(
+            results,
+            key=lambda r: (
+                0 if "shipra.frontend/" in str(r.get("file_path") or "").lower() else 1,
+                0 if any(
+                    x in str(r.get("file_path") or "").lower()
+                    for x in ("modal", "form", "/pages/", "/list/")
+                ) else 1,
+            ),
+        )
+
+    combined = "\n".join(
+        f"{r.get('file_path','')}\n{r.get('symbol','')}\n{r.get('text','')}"
+        for r in results
+    )
+    low = combined.lower()
+
+    # Evidence-derived workflow facts. These are intentionally conservative:
+    # a step is added only when the retrieved source text supports it.
+    steps = []
+    expected = None
+
+    def has(*terms):
+        return any(term.lower() in low for term in terms)
+
+    # ---- Return orders ----
+    if ("return" in q and "order" in q) or has("createreturnordercommand", "returnorderpage"):
+        if has("pages/orders/returnorders", "returnorderpage"):
+            steps.append("Open Shipra's **Orders → Return Orders** section.")
+        if has("returnorderlist", "openreturnordermodal"):
+            steps.append("Locate the order you want to return and open its **Return Order** workflow/modal.")
+        elif has("getorderbyid", "request.orderid"):
+            steps.append("Select the existing order for which the return needs to be created.")
+        if has("getallclientreturnreasonforselection", "clientreturnreasonid"):
+            steps.append("Select the applicable **return reason** from the available return reasons.")
+        if has("returncomment"):
+            steps.append("Enter the required return comment/details.")
+        if has("request.file", "uploadfileasync"):
+            steps.append("Attach the return file/document if it is required for this return.")
+        if has("returnproducts", "createreturnproduct"):
+            steps.append("For a fulfillable order, select/provide the products being returned where applicable.")
+        if has("createreturn(", "createreturnordercommand"):
+            steps.append("Submit the return request to create the return order.")
+        if has("returntrackinghistory", "enumreturnstatus.created"):
+            steps.append("After submission, verify that the return is created and appears in the return workflow/status tracking.")
+        expected = "A return record is created against the selected eligible order and enters the return tracking workflow."
+
+    # ---- Payment links ----
+    elif "payment link" in q or has("generatepaymentlink", "paymentlink/index.js"):
+        if has("pages/orders/paymentlink"):
+            steps.append("Open Shipra's **Orders → Payment Links** section.")
+        if has("getorderbyorderno", "request.orderno"):
+            steps.append("Locate/select the existing order for which you want to generate a payment link.")
+        validations = []
+        if has("enumpaymentmethod.pp", "prepaid orders"):
+            validations.append("the order is not prepaid")
+        if has("amount > 5000", "cannot exceed 5000"):
+            validations.append("the amount does not exceed 5000")
+        if has("amount.getvalueordefault() == 0", "zero amount"):
+            validations.append("the amount is greater than 0")
+        if validations:
+            steps.append("Before generating the link, confirm that " + ", ".join(validations) + ".")
+        if has("getpaymentlinkbyorderid"):
+            steps.append("Make sure a payment link does not already exist for that order.")
+        if has("generatepaymentlink", "paymentlink"):
+            steps.append("Use the available payment-link generation action and submit the request.")
+        steps.append("After success, verify the generated payment link in the Payment Links workflow.")
+        expected = "A unique payment link is generated for the eligible order."
+
+    # ---- Draft orders ----
+    elif "draft" in q and "order" in q:
+        if has("pages/orders/draftorders"):
+            steps.append("Open Shipra's **Draft Orders** section under Orders.")
+        if has("getallorderdrafts"):
+            steps.append("Review the existing draft orders and locate the draft you want to work with.")
+        if has("getorderdraftbydraftid", "handleeditorderdraft"):
+            steps.append("Open the selected draft for editing when you need to continue an existing draft.")
+        if has("createorderdraftcommand", "orderdraftid"):
+            steps.append("Enter or update the required order information and save/submit it as a draft.")
+        if has("createorderdraft", "updateorderdraft"):
+            steps.append("Verify that the draft is created or the existing draft is updated in the Draft Orders list.")
+        expected = "The order is saved as a new draft or the selected draft is updated."
+
+    # ---- Inventory ----
+    elif "inventory" in q:
+        if has("inventorysale", "product inventory"):
+            steps.append("Open the relevant **Product Inventory** screen in Shipra.")
+        if has("editinventorymodal", "updateproductstockquantitybyreason"):
+            steps.append("Select the inventory item whose stock quantity you want to update and open the inventory edit action.")
+            if has('name: "reason"', "transactiontypeid"):
+                steps.append("Select the applicable stock adjustment reason.")
+            if has('name: "quantity"', "quantity: parsefloat"):
+                steps.append("Enter the quantity to adjust and add a comment if required.")
+            steps.append("Submit the stock update and verify the refreshed inventory quantity.")
+        if has("syncinventorymodal", "salechannelinventorysync"):
+            steps.append("If inventory synchronization is required, choose the sale channel/configuration and run the inventory sync.")
+        expected = "The selected inventory operation is completed and the inventory view is refreshed with the verified result."
+
+    # Generic evidence-based fallback: do NOT pretend generic actions are exact.
+    if not steps:
+        frontend = [
+            r for r in results
+            if "frontend" in str(r.get("file_path", "")).lower()
+        ]
+        if frontend:
+            first_path = str(frontend[0].get("file_path") or "")
+            page_name = Path(first_path).parent.name or "relevant"
+            steps.append(
+                f"Open the Shipra frontend area related to **{page_name}** shown by the verified source evidence."
+            )
+            steps.append(
+                "Follow only the fields/actions visible in the verified frontend implementation below; the retrieved evidence does not verify enough UI detail to name additional steps safely."
+            )
+        else:
+            steps.append(
+                "The retrieved evidence verifies backend behavior but does not verify the user-facing screen/navigation, so exact UI steps cannot be stated safely."
+            )
+        expected = "The requested operation is described only where the retrieved evidence matches both the requested feature and action."
+
+    # Remove duplicate steps while preserving order.
+    unique_steps = []
+    seen = set()
+    for step in steps:
+        key = step.strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            unique_steps.append(step)
+
+    parts = ["### Practical Scenario Guide"]
+    for i, step in enumerate(unique_steps, 1):
+        parts.append(f"{i}. {step}")
+    parts.extend(["", f"**Expected Result:** {expected}", "", "### Actual Project Code Flow"])
+
+    if response_language == "Roman Urdu":
+        parts.append(
+            "Neeche guide aur code flow verified MCP project evidence par based hain."
+        )
+        explanation_heading = "**Is code mein kya ho raha hai:**"
+        explanation = "Yeh requested workflow se match karta hua exact MCP-verified source excerpt hai."
+    else:
+        parts.append(
+            "The guide and code flow below are based on verified MCP project evidence."
+        )
+        explanation_heading = "**What this code shows:**"
+        explanation = "This is an exact MCP-verified source excerpt matched to the request."
+
+    shown = 0
+    for result in results:
+        if result.get("source_type") != "actual_code":
+            continue
+
+        snippet = extract_exact_snippet(result, question)
+        if not snippet:
+            continue
+
+        path = str(result.get("file_path") or "Unknown file")
+        symbol = str(result.get("symbol") or "Not detected")
+        language = code_language(path)
+
+        # A batch return-report modal is a different workflow from creating a
+        # normal return order. Keep it only when the user's question asks for
+        # batch/report behavior.
+        path_low = path.lower()
+        question_low = (question or "").lower()
+        if (
+            "batchcreatereturnreport" in path_low
+            and "batch" not in question_low
+            and "report" not in question_low
+        ):
+            continue
+
+        if len(snippet) > 1800:
+            snippet = snippet[:1800].rstrip() + "\n// ..."
+
+        # Meaningful source headings instead of "Verified Source 1".
+        p = path.lower()
+        if "returnorders/list" in p:
+            heading = "Return Order List & User Actions"
+        elif "returnorders" in p and "frontend" in p:
+            heading = "Return Orders Frontend"
+        elif "createreturnorder" in p:
+            heading = "Return Order Creation Backend"
+        elif "paymentlink" in p and "frontend" in p:
+            heading = "Payment Link Frontend"
+        elif "generatepaymentlink" in p:
+            heading = "Payment Link Generation Backend"
+        elif "draftorders" in p and "frontend" in p:
+            heading = "Draft Orders Frontend"
+        elif "createorderdraft" in p:
+            heading = "Draft Order Creation Backend"
+        elif "inventory" in p and "frontend" in p:
+            heading = "Inventory Frontend"
+        else:
+            heading = Path(path).name or f"Verified Project Source {shown + 1}"
+
+        shown += 1
+        parts.extend([
+            "",
+            f"#### {heading}",
+            f"**File:** `{path}`",
+            f"**Function/Class:** `{symbol}`",
+            "",
+            f"```{language}",
+            snippet,
+            "```",
+            "",
+            explanation_heading,
+            explanation,
+        ])
+
+        if shown >= 3:
+            break
+
+    if shown == 0:
+        parts.extend([
+            "",
+            "No relevant executable source snippet was verified, so unrelated raw code was not displayed."
+        ])
+
+    return "\n".join(parts)
+
+
+def build_evidence_coverage(question, results):
+    """Describe only the project layers actually verified by MCP."""
+    paths = [
+        str(item.get("file_path") or item.get("path") or "")
+        .replace("\\", "/")
+        .lower()
+        for item in (results or [])
+    ]
+
+    profile = detect_request_profile(question)
+    action = str(profile.get("action") or "").strip().lower()
+    workflow = action in {
+        "create", "update", "delete", "assign", "connect",
+        "sync", "import", "export",
+    }
+
+    coverage = {
+        "frontend": any("shipra.frontend/" in p for p in paths),
+        "api_client": any(
+            ("axiosinterceptors" in p) or ("/api/" in p)
+            for p in paths
+        ),
+        "controller": any("controller" in p for p in paths),
+        "command_handler": any(
+            ("command" in p) or ("handler" in p) or ("query" in p)
+            for p in paths
+        ),
+        "validator": any("validator" in p for p in paths),
+        "repository_domain": any(
+            ("repository" in p) or ("api.core/" in p) or ("/core/" in p)
+            for p in paths
+        ),
+    }
+
+    if not workflow:
+        return coverage, ""
+
+    present = [k for k, v in coverage.items() if v]
+    missing = [k for k, v in coverage.items() if not v]
+
+    note = (
+        "VERIFIED EVIDENCE COVERAGE:\\n"
+        f"Present: {', '.join(present) if present else 'none'}\\n"
+        f"Missing: {', '.join(missing) if missing else 'none'}\\n"
+        "Use concrete user-facing workflow steps only when frontend evidence "
+        "supports them. Backend/domain evidence can explain system behavior, "
+        "but it cannot prove a screen, button, field, modal, or navigation path. "
+        "Never fill a missing layer by inference."
+    )
+    return coverage, note
+
+
+
+def build_verified_capabilities(results):
+    """Conservative, source-scoped executable evidence."""
+    def executable_only(raw):
+        raw = str(raw or "")
+        raw = re.sub(r"/\*.*?\*/", "", raw, flags=re.S)
+        raw = re.sub(r"^\s*///.*?$", "", raw, flags=re.M)
+        raw = re.sub(r"^\s*//.*?$", "", raw, flags=re.M)
+        return raw
+
+    sources = []
+    for item in (results or []):
+        path = str(item.get("file_path") or item.get("path") or "").replace("\\", "/")
+        raw = str(item.get("content") or item.get("snippet") or item.get("text") or "")
+        sources.append({"path": path, "path_lower": path.lower(), "exec": executable_only(raw)})
+
+    def any_source(pattern, path_pattern=None):
+        for s in sources:
+            if path_pattern and not re.search(path_pattern, s["path"], flags=re.I):
+                continue
+            if re.search(pattern, s["exec"], flags=re.I | re.S):
+                return True
+        return False
+
+    def same_source(*patterns, path_pattern=None):
+        for s in sources:
+            if path_pattern and not re.search(path_pattern, s["path"], flags=re.I):
+                continue
+            if all(re.search(p, s["exec"], flags=re.I | re.S) for p in patterns):
+                return True
+        return False
+
+    product_handler = r"ProductFeatures/.*/CreateProduct/.*Handler\.cs$"
+
+    return {
+        "frontend_verified": any("shipra.frontend/" in s["path_lower"] for s in sources),
+        "http_route_verified": any_source(
+            r"\[(HttpGet|HttpPost|HttpPut|HttpDelete|Route)\b|"
+            r"\b(MapGet|MapPost|MapPut|MapDelete)\s*\("
+        ),
+        "sku_lookup_verified": any_source(r"\bGetProductBySKUAsync\s*\(", product_handler),
+        "product_create_verified": any_source(r"\bCreateProductAsync\s*\(", product_handler),
+        "store_link_verified": any_source(r"\bCreateStoreProduct\s*\(", product_handler),
+        "variant_build_verified": any_source(r"\bGetProductVariants\s*\(", product_handler),
+        "variant_persist_verified": any_source(r"\bCreateProductVariantsAsync\s*\(", product_handler),
+        "inventory_build_verified": any_source(r"\bGetInventoryBalances\s*\(", product_handler),
+        "inventory_persist_verified": same_source(
+            r"\bGetInventoryBalances\s*\(",
+            r"\b(?:Create|Add|Save|Update|Insert)\w*InventoryBalance\w*(?:Async)?\s*\(",
+            path_pattern=product_handler,
+        ),
+        "history_create_verified": any_source(
+            r"\b(?:Create|Add|Save|Insert)\w*(?:StockHistory|InventoryHistory)\w*(?:Async)?\s*\(",
+            product_handler,
+        ),
+        "success_return_verified": same_source(
+            r"\b(?:response|serviceResult)\.IsSuccess\s*=\s*true\b|"
+            r"\bServiceResultDTO\s*\([^;]*(?:success|true)",
+            r"\breturn\s+(?:response|serviceResult)\s*;",
+            path_pattern=product_handler,
+        ),
+    }
+
+def build_evidence_driven_backend_guide(question, capabilities):
+    """Create a concise process guide only from positively verified capabilities."""
+    caps = capabilities or {}
+    q = (question or "").lower()
+    steps = []
+
+    # Product/inventory workflow capabilities.
+    if any(term in q for term in ("product", "inventory", "stock")):
+        if caps.get("sku_lookup_verified"):
+            steps.append(
+                "Shipra checks the supplied SKU against the current client's existing products."
+            )
+        if caps.get("product_create_verified"):
+            steps.append(
+                "When the visible creation branch is reached, Shipra creates the product record."
+            )
+        if caps.get("store_link_verified"):
+            steps.append(
+                "If a valid StoreId is present in the visible branch, Shipra creates the product-to-store association."
+            )
+        if caps.get("variant_build_verified"):
+            steps.append(
+                "Shipra builds product variants from the supplied ProductStocks data."
+            )
+        if caps.get("variant_persist_verified"):
+            steps.append(
+                "Shipra persists the generated product variants."
+            )
+        if caps.get("inventory_build_verified"):
+            steps.append(
+                "Shipra builds inventory-balance records from the generated variants and ProductStocks."
+            )
+        if caps.get("inventory_persist_verified"):
+            steps.append(
+                "Shipra persists the inventory-balance records."
+            )
+        if caps.get("history_create_verified"):
+            steps.append(
+                "Shipra creates the verified inventory/stock history records."
+            )
+
+    if not steps:
+        return None
+
+    lines = [
+        "### Practical Scenario Guide",
+        "",
+        (
+            "The steps below are generated only from operations directly verified "
+            "in the retrieved project code."
+        ),
+        "",
+        "**Verified Process:**",
+        "",
+    ]
+    for i, step in enumerate(steps[:8], 1):
+        lines.append(f"{i}. {step}")
+
+    lines.extend([""])
+    if caps.get("success_return_verified"):
+        lines.append(
+            "**Expected Result:** The retrieved executable code explicitly verifies a successful result for this flow."
+        )
+    else:
+        lines.append(
+            "**Expected Result:** The process is verified only up to the last operation shown above; no additional success or persistence behavior is assumed."
+        )
+
+    if not caps.get("frontend_verified"):
+        lines.extend([
+            "",
+            (
+                "**UI Limitation:** No verified frontend evidence was retrieved, so "
+                "screen names, fields, buttons, navigation, and submit actions are not inferred."
+            ),
+        ])
+
+    return "\n".join(lines)
+
+
+def replace_backend_guide_with_verified_capabilities(answer, question, coverage, capabilities):
+    """Replace backend-only Groq guide with deterministic capability-driven steps."""
+    if not answer or "### Practical Scenario Guide" not in answer:
+        return answer
+
+    frontend_verified = bool((coverage or {}).get("frontend"))
+    if frontend_verified:
+        return answer
+
+    guide = build_evidence_driven_backend_guide(question, capabilities)
+    if not guide:
+        return answer
+
+    code_marker = "### Actual Project Code Flow"
+    code_pos = answer.find(code_marker)
+    if code_pos == -1:
+        return answer
+
+    return guide.rstrip() + "\n\n" + answer[code_pos:]
+
+
+def build_displayed_evidence_capabilities(answer):
+    """Capabilities proven only by executable code actually displayed to the user."""
+    if not answer or "### Actual Project Code Flow" not in answer:
+        return {}
+
+    flow = answer.split("### Actual Project Code Flow", 1)[1]
+
+    # Only fenced code is proof. Explanatory prose cannot prove itself.
+    code_blocks = re.findall(r"```(?:[A-Za-z0-9_+#.-]+)?\s*\n(.*?)```", flow, flags=re.S)
+    executable = "\n".join(code_blocks)
+
+    # Strip comments so comments cannot establish behavior.
+    executable = re.sub(r"/\*.*?\*/", "", executable, flags=re.S)
+    executable = re.sub(r"^\s*///.*?$", "", executable, flags=re.M)
+    executable = re.sub(r"^\s*//.*?$", "", executable, flags=re.M)
+
+    def has(pattern):
+        return bool(re.search(pattern, executable, flags=re.I | re.S))
+
+    return {
+        "sku_lookup_verified": has(r"\bGetProductBySKUAsync\s*\("),
+        "product_create_verified": has(r"\bCreateProductAsync\s*\("),
+        "store_link_verified": has(r"\bCreateStoreProduct\s*\("),
+        "variant_build_verified": has(r"\bGetProductVariants\s*\("),
+        "variant_persist_verified": has(r"\bCreateProductVariantsAsync\s*\("),
+        "inventory_build_verified": has(r"\bGetInventoryBalances\s*\("),
+        "inventory_persist_verified": (
+            has(r"\bGetInventoryBalances\s*\(")
+            and has(r"\b(?:Create|Add|Save|Update|Insert)\w*InventoryBalance\w*(?:Async)?\s*\(")
+        ),
+        "history_create_verified": has(
+            r"\b(?:Create|Add|Save|Insert)\w*(?:StockHistory|InventoryHistory)\w*(?:Async)?\s*\("
+        ),
+        "success_return_verified": (
+            has(
+                r"\b(?:response|serviceResult)\.IsSuccess\s*=\s*true\b|"
+                r"\bServiceResultDTO\s*\([^;]*(?:success|true)"
+            )
+            and has(r"\breturn\s+(?:response|serviceResult)\s*;")
+        ),
+        "http_route_verified": has(
+            r"\[(HttpGet|HttpPost|HttpPut|HttpDelete|Route)\b|"
+            r"\b(MapGet|MapPost|MapPut|MapDelete)\s*\("
+        ),
+    }
+
+
+def enforce_displayed_evidence_boundary(answer, question):
+    """Rebuild backend guide and sanitize prose from evidence visible in the final answer."""
+    if not answer or "### Actual Project Code Flow" not in answer:
+        return answer
+
+    displayed = build_displayed_evidence_capabilities(answer)
+
+    # If no frontend is displayed, rebuild the guide from displayed executable proof.
+    flow = answer.split("### Actual Project Code Flow", 1)[1]
+    displayed_frontend = bool(re.search(
+        r"\*\*File:\*\*\s*`?[^`\n]*Shipra\.Frontend/",
+        flow,
+        flags=re.I,
+    ))
+
+    if not displayed_frontend and "### Practical Scenario Guide" in answer:
+        guide = build_evidence_driven_backend_guide(question, {
+            **displayed,
+            "frontend_verified": False,
+        })
+        if guide:
+            code_pos = answer.find("### Actual Project Code Flow")
+            answer = guide.rstrip() + "\n\n" + answer[code_pos:]
+
+    # Apply explanation guard using displayed capabilities, not hidden retrieval.
+    answer = sanitize_code_flow_explanations(answer, displayed)
+
+    # Catch "implied but not shown" persistence language explicitly.
+    if not displayed.get("inventory_persist_verified"):
+        answer = re.sub(
+            r"(?im)^(\s*(?:[-*]|\d+\.)\s*).*inventory balance.*"
+            r"(?:persist|save).*?(?:implied|not shown|not visible).*?$",
+            r"\1Inventory balances – The displayed code builds inventory-balance records "
+            r"and checks whether entries exist. The persistence operation is not visible "
+            r"in the displayed executable evidence.",
+            answer,
+        )
+
+    return answer
+def sanitize_code_flow_explanations(answer, capabilities):
+    """Apply the same verified boundary to code-flow prose."""
+    if not answer or "### Actual Project Code Flow" not in answer:
+        return answer
+
+    caps = capabilities or {}
+    output = []
+
+    for original in answer.splitlines():
+        line = original
+        low = line.lower()
+        prefix_match = re.match(r"^(\s*(?:[-*]|\d+\.)\s*)", line)
+        prefix = prefix_match.group(1) if prefix_match else ""
+
+        if not caps.get("http_route_verified") and (
+            "http request" in low or "api endpoint" in low or "http endpoint" in low
+            or re.search(r"\b(post|get|put|delete)\s+request\b", low)
+        ):
+            continue
+
+        if caps.get("inventory_build_verified") and not caps.get("inventory_persist_verified"):
+            if "inventory balance" in low and re.search(
+                r"\b(persist|persists|persisted|save|saves|saved)\b", low
+            ):
+                line = (
+                    prefix
+                    + "Inventory balances – The visible code builds inventory-balance records "
+                    "and checks whether the resulting list contains entries. Persistence is not "
+                    "visible in the supplied excerpt."
+                )
+                low = line.lower()
+
+            if "inventory balance" in low and re.search(
+                r"\bwould\s+(?:create|persist|save|insert)\b", low
+            ):
+                line = (
+                    prefix
+                    + "The visible excerpt verifies the inventory-balance build and the "
+                    "`if (...Any())` check. The operations inside the truncated block are not visible."
+                )
+                low = line.lower()
+
+        if not caps.get("history_create_verified") and re.search(
+            r"\b(stock history|stockhistory|inventory history|inventoryhistory)\b", low
+        ):
+            if not any(x in low for x in (
+                "not shown", "not visible", "not verified", "inferred from comments",
+                "comment", "evidence gap", "omitted"
+            )):
+                continue
+
+        if not caps.get("success_return_verified"):
+            # Explicit invisible-return wording always wins over the earlier generic removal.
+            if "return statement is not visible" in low or "return is not visible" in low:
+                line = prefix + "The final handler return behavior is not visible in the supplied excerpt."
+                low = line.lower()
+            elif (
+                "returns a serviceresultdto" in low
+                or "return success" in low
+                or "returns success" in low
+                or "indicating success or failure" in low
+                or "success response" in low
+            ):
+                continue
+
+        output.append(line)
+
+    return "\n".join(output)
+
+def sanitize_unverified_execution_claims(answer, coverage):
+    """Remove common execution claims that require evidence layers not retrieved."""
+    if not answer:
+        return answer
+
+    api_verified = bool(
+        (coverage or {}).get("api_client")
+        or (coverage or {}).get("controller")
+    )
+
+    lines = []
+    for line in answer.splitlines():
+        low = line.lower()
+
+        # No API/controller evidence => never invent transport or invocation details.
+        if not api_verified and (
+            re.search(r"\bpost request\b", low)
+            or re.search(r"\bget request\b", low)
+            or re.search(r"\bput request\b", low)
+            or re.search(r"\bdelete request\b", low)
+            or "api endpoint" in low
+            or "http endpoint" in low
+            or "calling the handler directly" in low
+        ):
+            continue
+
+        # Qualify claims that explicitly admit the executable proof is outside excerpt.
+        if "not shown in the excerpt" in low and (
+            "throw" in low or "fails" in low or "failure" in low
+        ):
+            line = re.sub(
+                r"(?i)if .*?(?:,|;)\s*(?:the )?operation (?:fails|would fail).*",
+                "The supplied comment indicates duplicate-SKU rejection is intended, "
+                "but the executable rejection branch is not visible in this excerpt.",
+                line,
+            )
+
+        # If persistence/success is explicitly said to occur beyond the excerpt,
+        # reduce it to the operation that is actually visible.
+        if "code continues beyond the excerpt" in low:
+            line = re.sub(
+                r"(?i)\s+and persists them\s*\(code continues beyond the excerpt\)",
+                " (persistence is not visible in this excerpt)",
+                line,
+            )
+            line = re.sub(
+                r"(?i)\s+and (?:then )?persists them.*",
+                " (persistence is not visible in this excerpt)",
+                line,
+            )
+
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
+def sanitize_practical_guide(answer, coverage):
+    """Keep the guide useful while preventing unsupported UI or outcome claims."""
+    if not answer or "### Practical Scenario Guide" not in answer:
+        return answer
+
+    scenario_marker = "### Practical Scenario Guide"
+    code_marker = "### Actual Project Code Flow"
+    start = answer.find(scenario_marker)
+    end = answer.find(code_marker, start)
+    if end == -1:
+        return answer
+
+    frontend_verified = bool((coverage or {}).get("frontend"))
+    api_verified = bool(
+        (coverage or {}).get("api_client")
+        or (coverage or {}).get("controller")
+    )
+    backend_verified = bool(
+        (coverage or {}).get("command_handler")
+        or (coverage or {}).get("repository_domain")
+    )
+
+    guide = answer[start:end]
+    lines = guide.splitlines()
+
+    # Backend-only workflow:
+    # Keep concrete process steps produced from verified evidence, but strip
+    # user-interface wording that is not supported by frontend evidence.
+    if not frontend_verified:
+        process_steps = []
+
+        for line in lines:
+            stripped = line.strip()
+            if not re.match(r"^\d+\.", stripped):
+                continue
+
+            step = re.sub(r"^\d+\.\s*", "", stripped).strip()
+            low = step.lower()
+
+            # Reject inferred UI/navigation/control instructions.
+            if re.search(
+                r"\b(open|navigate|click|press|screen|page|modal|button|dropdown|"
+                r"tab|menu|toast|notification)\b",
+                low,
+            ):
+                continue
+
+            # Convert user-input phrasing into neutral process phrasing.
+            replacements = [
+                (r"^fill in\s+", "Provide "),
+                (r"^enter\s+", "Provide "),
+                (r"^type\s+", "Provide "),
+                (r"^choose\s+", "Provide "),
+                (r"^select\s+", "Provide "),
+                (r"^add\s+", "Provide "),
+            ]
+            for pattern, replacement in replacements:
+                step = re.sub(pattern, replacement, step, flags=re.I)
+
+            # Do not keep speculative language as a verified step.
+            if re.search(r"\b(likely|probably|should|would|may be|assume)\b", step, re.I):
+                continue
+
+            if step:
+                process_steps.append(step.rstrip("."))
+
+        # Deduplicate while preserving order.
+        unique_steps = []
+        seen = set()
+        for step in process_steps:
+            key = re.sub(r"\W+", " ", step.lower()).strip()
+            if key and key not in seen:
+                seen.add(key)
+                unique_steps.append(step)
+
+        rebuilt = [
+            scenario_marker,
+            "",
+            (
+                "The retrieved evidence verifies the project process below. "
+                "Exact frontend navigation or control names are not stated unless "
+                "frontend evidence is available."
+            ),
+            "",
+            "**Verified Process:**",
+        ]
+
+        if unique_steps:
+            for i, step in enumerate(unique_steps[:8], 1):
+                rebuilt.append(f"{i}. {step}.")
+        elif backend_verified:
+            rebuilt.append(
+                "1. Shipra processes the request according to the verified backend "
+                "sequence shown in the Actual Project Code Flow below."
+            )
+        else:
+            rebuilt.append(
+                "1. The retrieved evidence is not sufficient to state concrete "
+                "workflow steps safely."
+            )
+
+        rebuilt.extend([
+            "",
+            (
+                "**Expected Result:** The verified backend/system behavior described "
+                "in the code flow is completed."
+                if backend_verified
+                else
+                "**Expected Result:** Only behavior explicitly supported by the "
+                "retrieved evidence can be confirmed."
+            ),
+            "",
+            (
+                "**UI Limitation:** The retrieved evidence does not verify the exact "
+                "Shipra screen, buttons, fields, or frontend action used to trigger "
+                "this process."
+            ),
+            "",
+        ])
+
+        return answer[:start] + "\n".join(rebuilt) + answer[end:]
+
+    # Frontend exists:
+    # preserve useful UI steps, but remove submit/success claims unless linkage exists.
+    kept = []
+    for line in lines:
+        stripped = line.strip()
+        low = stripped.lower()
+
+        if re.match(r"^\d+\.", stripped):
+            if not api_verified and (
+                (
+                    re.search(r"\b(click|press)\b", low)
+                    and re.search(r"\b(submit|create|save)\b", low)
+                )
+                or "submit button" in low
+                or "create button" in low
+                or "save button" in low
+            ):
+                continue
+
+            if not api_verified and (
+                "success toast" in low
+                or "success notification" in low
+                or ("appears" in low and "list" in low)
+                or "redirect" in low
+            ):
+                continue
+
+        if low.startswith("**expected result:**") or low.startswith("expected result:"):
+            if not api_verified and (
+                "success toast" in low
+                or "success notification" in low
+                or ("appears" in low and "list" in low)
+                or "redirect" in low
+            ):
+                line = (
+                    "**Expected Result:** The verified backend behavior is completed; "
+                    "the exact frontend confirmation is not verified."
+                    if backend_verified
+                    else
+                    "**Expected Result:** Only behavior explicitly verified by the "
+                    "retrieved project evidence can be confirmed."
+                )
+
+        kept.append(line)
+
+    # Renumber surviving steps.
+    n = 0
+    fixed = []
+    for line in kept:
+        if re.match(r"^\s*\d+\.", line):
+            n += 1
+            line = re.sub(r"^(\s*)\d+\.", rf"\g<1>{n}.", line, count=1)
+        fixed.append(line)
+
+    return answer[:start] + "\n".join(fixed).rstrip() + "\n\n" + answer[end:]
+
+def get_accuracy_continuation_queries(question, results):
+    """Build cheap MCP follow-up queries when evidence is backend-only or visibly truncated."""
+    paths = [
+        str(item.get("file_path") or item.get("path") or "")
+        for item in (results or [])
+    ]
+    snippets = "\n".join(
+        str(item.get("content") or item.get("snippet") or item.get("text") or "")
+        for item in (results or [])
+    )
+
+    queries = []
+    backend_paths = [p for p in paths if "CommandHandler" in p or "Handler" in p]
+
+    # A handler ending around an open conditional is a strong signal that the
+    # decisive persistence/success branch may be just beyond the returned chunk.
+    tail = snippets[-1800:]
+    truncated_signal = (
+        tail.count("{") > tail.count("}")
+        or bool(re.search(r"\bif\s*\([^)]*\)\s*\{\s*$", tail, re.S))
+    )
+
+    if backend_paths and truncated_signal:
+        feature = extract_feature_terms(question)
+        base = " ".join(feature[:5]) if feature else question
+        queries.extend([
+            f"{base} handler continuation persistence success exception",
+            f"{base} repository create inventory balance history options",
+        ])
+
+    # Keep it bounded: at most two deterministic MCP follow-ups.
+    return list(dict.fromkeys(q for q in queries if q.strip()))[:2]
+
+
+
+def build_architecture_guidance_answer(question):
+    """Fast deterministic answer for Shipra architecture/development-layer questions."""
+    if not is_architecture_question(question):
+        return None
+
+    if get_response_language(question) == "Roman Urdu":
+        return """### Shipra mein new feature ke liye kin layers mein kaam hota hai?
+
+Shipra ke existing project structure ke mutabiq, new feature ki requirement par depend karte hue aam tor par ye layers check/change hoti hain:
+
+1. **Frontend Layer** – `Shipra.Frontend` mein page/component/modal/form aur required UI validation.
+2. **Frontend API Layer** – frontend se backend request bhejne ke liye existing API/Axios helper ko use ya extend karna.
+3. **API / Controller Layer** – agar new backend operation chahiye ho to endpoint/controller action expose karna.
+4. **Application Layer** – `Command`/`Query`, `Handler`, `Validator` aur required request/response models add ya update karna.
+5. **Core / Domain Layer** – new business entity, enum, value object ya business rule ho to `Shipra.Backend.API.Core` update karna.
+6. **Repository / Persistence Layer** – database read/write ke liye repository methods/implementation add ya update karna.
+7. **Database Layer** – sirf jab feature ko new table, column, relation ya schema change chahiye ho.
+8. **DI / Configuration** – new service/repository introduce ho to service registration/configuration update karna.
+
+**Important:** Har feature mein ye sari layers change karna zaroori nahi. Sirf UI change ho to backend/database touch nahi hoga; complete business feature mein frontend se database tak multiple layers involve ho sakti hain.
+
+### Typical Shipra Development Flow
+
+`Frontend UI → Frontend API Helper → API/Controller → Command/Query → Handler/Validator → Domain Logic → Repository → Database`
+
+Feature implement karte waqt pehle existing similar Shipra feature ka end-to-end flow trace karna best hai, phir sirf required layers mein changes karne chahiye."""
+    return """### Shipra development layers for a new feature
+
+Depending on the feature, Shipra commonly requires changes across these layers:
+
+1. **Frontend Layer** – page/component/modal/form and UI validation in `Shipra.Frontend`.
+2. **Frontend API Layer** – use or extend the frontend API/Axios helper for backend requests.
+3. **API / Controller Layer** – expose a controller action/endpoint when a new backend operation is required.
+4. **Application Layer** – add or update the `Command`/`Query`, `Handler`, `Validator`, and request/response models.
+5. **Core / Domain Layer** – update `Shipra.Backend.API.Core` when introducing business entities, enums, value objects, or domain rules.
+6. **Repository / Persistence Layer** – add or update repository operations for database reads/writes.
+7. **Database Layer** – only when a new table, column, relationship, or schema change is required.
+8. **DI / Configuration** – register new services/repositories and required configuration.
+
+**Important:** Not every feature requires every layer. A UI-only change may not touch the backend or database, while a complete business feature can span several layers.
+
+### Typical Shipra Development Flow
+
+`Frontend UI → Frontend API Helper → API/Controller → Command/Query → Handler/Validator → Domain Logic → Repository → Database`"""
+
+
+
+def build_codebase_location_answer(question, results):
+    """Fast direct renderer: exact location + symbol + small verified code excerpt."""
+    verified = list(results or [])
+    if not verified:
+        return (
+            "### Codebase Location\n\n"
+            "Requested item ki exact location MCP source evidence se verify nahi ho saki. "
+            "Main unverified file path guess nahi kar raha."
+        )
+
+    unique = []
+    seen = set()
+    for item in verified:
+        path = str(item.get("file_path") or item.get("path") or "").strip()
+        if not path or path.lower() in seen:
+            continue
+        seen.add(path.lower())
+        unique.append(item)
+        if len(unique) >= 4:
+            break
+
+    if not unique:
+        return "### Codebase Location\n\nMCP evidence mili, lekin exact source file path verify nahi ho saka."
+
+    roman = get_response_language(question) != "English"
+    lines = [
+        "### Codebase Location", "",
+        ("Requested code/configuration in MCP-verified locations par mila:"
+         if roman else
+         "The requested code/configuration was found at these MCP-verified locations:"),
+        ""
+    ]
+
+    for idx, item in enumerate(unique, 1):
+        path = str(item.get("file_path") or item.get("path") or "").strip()
+        symbol = str(
+            item.get("function_class") or item.get("symbol") or item.get("name") or ""
+        ).strip()
+        snippet = str(
+            item.get("text") or item.get("content") or item.get("snippet") or ""
+        ).strip()
+
+        # Keep only a small exact MCP excerpt so the answer remains fast/readable.
+        if snippet:
+            snippet_lines = snippet.splitlines()
+            # Prefer lines around DI/configuration registrations when present.
+            keys = (
+                "IServiceCollection", "AddTransient", "AddScoped", "AddSingleton",
+                "InstallApplicationServices", "InstallServices", "AddAuthentication",
+                "AddJwtBearer", "AddMediatR", "AddAutoMapper"
+            )
+            hit = next(
+                (i for i, line in enumerate(snippet_lines)
+                 if any(k.lower() in line.lower() for k in keys)),
+                0
+            )
+            lo = max(0, hit - 2)
+            hi = min(len(snippet_lines), hit + 7)
+            snippet = "\n".join(snippet_lines[lo:hi]).strip()
+
+        lines.append(f"**{idx}. `{path}`**")
+        if symbol and symbol.lower() not in {"not detected", "none", "null"}:
+            lines.append(f"**Function/Class:** `{symbol}`")
+
+        searchable = f"{path}\n{symbol}\n{snippet}".lower()
+        if "servicecollectionextensions" in searchable and "installapplicationservices" in searchable:
+            role = "Application-layer dependency/service registrations yahan configured hain." if roman else "Application-layer dependency/service registrations are configured here."
+        elif "servicecollectionextensions" in searchable and "installservices" in searchable:
+            role = "Web-layer service registrations yahan configured hain." if roman else "Web-layer service registrations are configured here."
+        elif "authenticationextensions" in searchable or "addscopedjwtauthentication" in searchable:
+            role = "Authentication/JWT-related dependency registration yahan configured hai." if roman else "Authentication/JWT-related dependency registration is configured here."
+        else:
+            role = "Yeh requested item ka verified source location hai." if roman else "This is a verified source location for the requested item."
+
+        lines.append(f"**Role:** {role}")
+
+        if snippet:
+            ext = Path(path).suffix.lower()
+            lang = {
+                ".cs": "csharp", ".js": "javascript", ".jsx": "jsx",
+                ".ts": "typescript", ".tsx": "tsx", ".py": "python",
+                ".json": "json", ".sql": "sql"
+            }.get(ext, "")
+            lines.extend(["", "**Relevant code:**", f"```{lang}", snippet, "```"])
+
+        lines.append("")
+
+    primary = str(unique[0].get("file_path") or unique[0].get("path") or "").strip()
+    lines.append(
+        f"**Main matched location:** `{primary}`"
+        if roman else
+        f"**Primary matched location:** `{primary}`"
+    )
+    return "\n".join(lines).strip()
+
+def _location_cache_key(question):
+    return _normalize_intent_text(question)
+
+
+def _get_location_answer_cache():
+    if "_shipra_location_answer_cache" not in st.session_state:
+        st.session_state["_shipra_location_answer_cache"] = {}
+    return st.session_state["_shipra_location_answer_cache"]
+
+
 def ask_shipra_project_ai(question, intent):
+    # ONE authoritative semantic route per user turn.
+    # Downstream retrieval/rendering must obey this route.
+    hybrid_route = resolve_authoritative_route(question)
+    # ARCHITECTURE FAST PATH:
+    # These are project-structure guidance questions, not end-user workflows.
+    # Answer deterministically before history retrieval, MCP startup, RAG, or Groq.
+    architecture_answer = build_architecture_guidance_answer(question)
+    if architecture_answer is not None:
+        return clean_assistant_display_text(architecture_answer), []
+
+    # Repeated verified location lookup: instant session-cache response.
+    if is_codebase_location_question(question) or hybrid_route.get("intent") == "codebase_location":
+        cached = _get_location_answer_cache().get(_location_cache_key(question))
+        if cached:
+            return cached["answer"], cached["results"]
+
     response_language = get_response_language(question)
     code_explanation_heading = (
         "**What this code does:**"
@@ -4986,6 +6960,13 @@ def ask_shipra_project_ai(question, intent):
     # before source-code retrieval. This prevents "pending" from drifting into
     # unrelated COD-pending handlers or other semantic source matches.
     order_count_status = detect_order_count_status(question)
+    if (
+        not order_count_status
+        and hybrid_route.get("intent") == "data_query"
+        and str(hybrid_route.get("entity") or "").lower() in {"order", "orders"}
+    ):
+        order_count_status = hybrid_route.get("status")
+
     if order_count_status:
         try:
             status_result = asyncio.run(
@@ -5012,6 +6993,19 @@ def ask_shipra_project_ai(question, intent):
             "I won't infer the count from source-code snippets."
         ), []
 
+    # AUTHORITATIVE DATA-ROUTE GUARD:
+    # A business-data question must never drift into code/workflow retrieval.
+    if route_requires_runtime_data(hybrid_route):
+        if response_language == "Roman Urdu":
+            return (
+                "Is sawal ka exact jawab current connected runtime/database evidence se "
+                "verify nahi ho saka. Main source code se business data guess nahi karunga."
+            ), []
+        return (
+            "The exact answer could not be verified from the currently connected "
+            "runtime/database evidence. I won't infer business data from source code."
+        ), []
+
     # Validate raw source availability before code-flow retrieval. Mock-data
     # record lookups are allowed to continue because they use a separate tool.
     lowered_for_health = question.lower()
@@ -5029,17 +7023,9 @@ def ask_shipra_project_ai(question, intent):
         )
     )
 
-    if not is_mock_record_lookup:
-        try:
-            source_health = asyncio.run(get_mcp_source_health())
-        except Exception:
-            source_health = {}
-
-        if source_health and not bool(source_health.get("raw_source_ready")):
-            return build_source_unavailable_answer(
-                question,
-                source_health,
-            ), []
+    # FAST PATH:
+    # Do not launch a separate MCP process only to health-check the source tree.
+    # The real evidence call below is authoritative and avoids one full MCP round-trip.
 
 
     # ------------------------------------------------------------------
@@ -5052,6 +7038,7 @@ def ask_shipra_project_ai(question, intent):
     primary_mcp_error = None
 
     try:
+        mcp_started = time.time()
         mcp_results = asyncio.run(
             collect_mcp_evidence(
                 question,
@@ -5059,6 +7046,7 @@ def ask_shipra_project_ai(question, intent):
                 [],
             )
         )
+        print(f"MCP PRIMARY TOTAL: {time.time() - mcp_started:.2f} sec")
     except Exception as error:
         primary_mcp_error = error
 
@@ -5069,7 +7057,7 @@ def ask_shipra_project_ai(question, intent):
         # suggest candidate identifiers/paths, then ask MCP to verify them.
         rag_candidates = search_documentation(
             search_question,
-            top_k=15,
+            top_k=8,
         )
         rag_candidates = filter_relevant_results(
             rag_candidates,
@@ -5089,7 +7077,10 @@ def ask_shipra_project_ai(question, intent):
                 primary_mcp_error = fallback_error
 
     # Final factual evidence is MCP-read evidence only.
-    results = mcp_results
+    # Universal semantic contract: the requested entity AND operation must match.
+    # Related configuration/settings code is not accepted as evidence for a
+    # different business operation.
+    results = enforce_request_evidence_contract(mcp_results, question)
 
     partial_entity_evidence = False
 
@@ -5120,8 +7111,16 @@ def ask_shipra_project_ai(question, intent):
                 entity_results = []
 
             if entity_results:
-                results = entity_results
-                partial_entity_evidence = True
+                # Entity-only evidence is context only. Re-apply the original
+                # question contract so neighboring operations cannot masquerade
+                # as the requested workflow.
+                compatible_entity_results = enforce_request_evidence_contract(
+                    entity_results,
+                    question,
+                )
+                if compatible_entity_results:
+                    results = compatible_entity_results
+                    partial_entity_evidence = True
 
     if results:
         if partial_entity_evidence:
@@ -5156,6 +7155,28 @@ def ask_shipra_project_ai(question, intent):
 
         return build_verified_evidence_gap_answer(question), []
 
+    # CODEBASE LOCATION FAST RENDER:
+    # Retrieval has already been verified by MCP. Location questions must never
+    # fall through to Practical Scenario Guide / workflow formatting.
+    if is_codebase_location_question(question) or hybrid_route.get("intent") == "codebase_location":
+        location_answer = clean_assistant_display_text(
+            build_codebase_location_answer(question, results)
+        )
+        cache = _get_location_answer_cache()
+        cache[_location_cache_key(question)] = {
+            "answer": location_answer,
+            "results": results,
+        }
+        while len(cache) > 30:
+            cache.pop(next(iter(cache)))
+        return location_answer, results
+
+    # DATA QUERY FAST RENDER:
+    # Counts/totals/status questions are answered from connected data evidence,
+    # never from source-code workflow inference.
+    if is_data_aggregate_question(question) or hybrid_route.get("intent") == "data_query":
+        return build_data_query_answer(question, results), results
+
     mock_answer = answer_from_mock_data(
         question,
         results,
@@ -5169,7 +7190,29 @@ def ask_shipra_project_ai(question, intent):
             if item.get("source_type") == "mock_data"
         ]
 
+    evidence_coverage, evidence_coverage_note = build_evidence_coverage(
+        question,
+        results,
+    )
+    verified_capabilities = build_verified_capabilities(results)
+
+    # Accuracy hint: when a handler excerpt is visibly truncated, enrich the context-search
+    # wording with deterministic continuation terms. This adds no LLM call.
+    continuation_queries = get_accuracy_continuation_queries(question, results)
+    if continuation_queries:
+        search_question = search_question + " " + " ".join(continuation_queries)
+
     context = build_context(results, search_question)
+
+    # SPEED: keep full verified MCP results for code injection/fallback, but limit
+    # only the text sent to Groq. This reduces prompt/token processing latency.
+    MAX_GROQ_CONTEXT_CHARS = 16000
+    if len(context) > MAX_GROQ_CONTEXT_CHARS:
+        context = context[:MAX_GROQ_CONTEXT_CHARS]
+        print(
+            f"Groq context capped at {MAX_GROQ_CONTEXT_CHARS} chars "
+            "for faster generation."
+        )
 
     verification_scope = (
         "PARTIAL_ENTITY_ONLY"
@@ -5201,6 +7244,21 @@ ACCURACY CONTRACT:
   * do not invent usage steps for the missing operation.
 - Treat only that verified evidence as factual project truth.
 - Accuracy is more important than completeness.
+- Prefer directly relevant files over files that merely share similar names.
+- Cross-check frontend actions against backend behavior when both are verified.
+- Never convert a domain entity/model into a user-facing workflow step.
+- If two verified sources conflict, state the conflict instead of silently choosing one.
+- A file name alone never proves that a screen, route, action, or workflow is reachable.
+- Do not write a Submit/Create/Save button step unless retrieved frontend evidence shows that action and its handler/linkage.
+- Do not claim a success toast, redirect, list refresh, or newly displayed record unless retrieved frontend evidence explicitly shows that outcome.
+- If frontend evidence is absent for a workflow question, do not invent UI navigation or controls. Instead create 4-8 short numbered Verified Process steps directly from the retrieved backend evidence, in execution order where the code establishes one. Request properties may be described as required/provided data, but never as named UI fields unless frontend evidence verifies them. Explicitly state the UI evidence gap.
+- Never say an exception is thrown, a record is persisted, a success response is returned, or a later operation completes unless that behavior is visible in the supplied executable excerpt. Comments may be described as comments/intended behavior, not as executed fact.
+- Never invent an HTTP method, endpoint, controller, route, or direct handler invocation when API/controller evidence is absent.
+- If an excerpt ends immediately after constructing data or opening an if/loop/block, describe only the visible construction/check; do not claim what the unseen continuation does.
+- For backend-only workflow guides, executable method calls are stronger evidence than comments. Never promote comments, DTO property names, or truncated continuation into completed behavior.
+- Apply the same evidence boundary to every `What this code does` section and Evidence Gaps: if persistence/history/success is beyond the visible excerpt, explicitly say it is not visible instead of describing it as completed.
+- Keep evidence source-scoped. Never combine different files/snippets to prove one completed operation. Persistence and success require decisive executable statements in the same relevant handler snippet.
+- Final-answer invariant: a guide or code-flow claim may never be stronger than the executable evidence actually displayed under `Actual Project Code Flow`. Hidden retrieved chunks may help retrieval, but cannot justify a stronger displayed claim unless their supporting code is also included in the displayed evidence.
 - Never turn semantic similarity into a project fact.
 - The entity requested by the user and the operation requested by the user
   must both match the code before you present usage steps.
@@ -5213,6 +7271,9 @@ ACCURACY CONTRACT:
   connection as an evidence gap.
 - Existing-feature usage questions must not receive newly proposed code just
   because some evidence is missing.
+
+VERIFIED LAYER COVERAGE:
+{evidence_coverage_note}
 
 Conversation context (may be empty):
 {conversation_text}
@@ -5346,6 +7407,78 @@ If existing functionality directly supports the requested operation:
 - Do not add a Proposed implementation section for a usage question.
 - Do not create a replacement form, service, or API wrapper unnecessarily.
 
+HYBRID SEMANTIC ROUTER RULES:
+- Deterministic fast paths handle obvious high-frequency intents for speed.
+- Unseen wording is classified semantically by the LLM; do not require exact keywords.
+- The semantic router classifies only. It is NOT evidence and must never invent Shipra facts.
+- Project facts/locations/workflows must still be grounded in MCP evidence.
+- Business counts must still be grounded in connected runtime/mock/database evidence.
+- If evidence is insufficient, state the limitation rather than filling gaps.
+
+DATA / AGGREGATE QUESTION RULES:
+- HOW MANY / COUNT / TOTAL / KITNY / KITNE / کتنے questions about orders, returns, shipments, products, inventory, customers, invoices, payments or sales are DATA_QUERY intents.
+- Status wording may be English, Roman Urdu, Urdu script, code-switched, misspelled, or paraphrased (delivered, deliver ho gay, pending, cancelled, returned, shipped, etc.).
+- NEVER output `Practical Scenario Guide`, UI navigation, code workflow, or inferred database counts for DATA_QUERY.
+- Use only connected runtime/mock/database evidence for the number.
+- If no data evidence is connected, clearly say the exact count cannot be verified; never derive a live count from repository source code.
+
+CODEBASE LOCATION QUESTION RULES:
+- WHERE/KAHAN/KIDHAR/KIS FILE/KIS JAGA questions about project code are direct codebase lookups, not user workflows.
+- NEVER output `Practical Scenario Guide`, `Expected Result`, UI/navigation limitations, or workflow wording for these questions.
+- Start with `### Codebase Location`.
+- State the exact MCP-verified file path(s), then Function/Class when verified, and briefly explain each location's role.
+- Do not guess a path. If MCP cannot verify the location, say that exact location could not be verified.
+- Prefer the most direct matching file as the primary location; related verified configuration files may be listed as additional locations.
+
+ARCHITECTURE / DEVELOPMENT-GUIDANCE QUESTION RULES:
+- Questions asking which Shipra layers/files/parts must be touched for a new feature are architecture guidance, NOT an end-user workflow and NOT an instruction to implement that feature.
+- Do NOT output Practical Scenario Guide for these questions.
+- Start with a direct heading such as `### Shipra Development Layers` (translated naturally when needed), then explain the verified layers in implementation order.
+- Use representative retrieved files to establish project conventions: frontend UI/components, frontend API/helper layer, API/controller exposure, Application Commands/Queries/Handlers/Validators, Core/domain, repository/infrastructure/persistence, database/migrations when actually evidenced, and DI/configuration when actually evidenced.
+- Clearly say that not every feature requires every layer; only include a layer as a Shipra-specific fact when retrieved project evidence supports it.
+- Do not search for or pretend there is one existing screen for the hypothetical new feature.
+- Do not add a `Proposed implementation` section unless the user explicitly asks to implement/change code now.
+- End with `### Actual Project Code Flow` and show concise representative verified source evidence.
+
+EXPLANATION QUESTION RULES:
+- WHY/WHAT-DOES/PURPOSE questions about a named file are explanations, not workflows.
+- Do NOT output Practical Scenario Guide for explanation questions.
+- Use a purpose/why heading, concise evidence-based explanation, then Actual Project Code Flow.
+- An explicitly named file is a hard retrieval target; never substitute a semantic neighbor.
+- Show only the exact file and a verified direct importer/caller when useful.
+- Exclude unrelated auth, DI, config, validators, services, and broad keyword matches.
+
+PRACTICAL GUIDE QUALITY RULES:
+- The Practical Scenario Guide is a USER WORKFLOW, not a code summary.
+- Write it exactly in chronological order: FIRST -> NEXT -> THEN -> FINALLY.
+- Use a numbered list only: 1., 2., 3., ...
+- Prefer 4-7 short, concrete steps when the evidence supports them.
+- Every step must tell the user one practical action to perform inside Shipra.
+- Step 1 should say which verified Shipra page/section/view to open.
+- The next steps should say what verified item/order/record to find or select.
+- Then explain which verified fields/options/statuses/reasons/filters to enter or choose.
+- Then explain the verified action to perform (for example submit, save, generate,
+  update, sync, create), but use the exact control/button name only when frontend
+  evidence verifies that name.
+- After the action, explain any verified confirmation/result the user should check.
+- End with exactly one short line beginning with "Expected Result:".
+- Make the steps specific to the user's requested Shipra feature. Never use generic
+  filler such as "open the requested feature", "use the verified controls", or
+  "complete the workflow".
+- Use frontend evidence to determine user-facing navigation, fields, controls,
+  modals, tables, and actions.
+- Backend evidence may be used to explain verified eligibility/validation that the
+  user needs to know, but do not turn backend-only implementation into fake UI steps.
+- If frontend evidence proves the screen but not an exact button/control name,
+  describe the action naturally without inventing a name.
+- If a user-facing step is genuinely not verified, say briefly in that step that the
+  exact UI control is not verified; do not guess.
+- Do NOT include source code, code fences, file paths, "Reference:", Function/Class,
+  API names, handler names, repositories, React state, useEffect, mediator calls, or
+  implementation explanation in the guide.
+- Put ALL technical evidence, code, file paths, functions/classes, APIs, backend
+  behavior, and evidence-gap details under "### Actual Project Code Flow".
+
 If the user explicitly requests a code change AND the detected request type
 is project_change:
 - Explain what existing functionality was verified.
@@ -5390,200 +7523,130 @@ USER QUESTION:
 {question}
 """
 
-    scenario_prompt = f"""
-Write a short practical step-by-step guide in {response_language}.
 
-Rules:
-- Maximum 6 steps.
-- Each step must be 1-2 short sentences.
-- NEVER include code.
-- NEVER include fenced code blocks.
-- NEVER include Function/Class labels.
-- You MAY mention only a short file reference when useful, like:
-  Reference: Shipra.Frontend/src/pages/orders/createRegularOrder/index.js
-- Do not explain source code here.
-- Do not dump file contents.
-- Focus only on what the user should do.
-- Mention only controls/actions actually supported by MCP-verified frontend source.
-- Do not derive UI steps from backend-only evidence.
-- The requested entity and requested operation must both match the verified frontend code.
-- If the existing screen controls were not verified, say that instead of inventing steps.
-- If verification scope is PARTIAL_ENTITY_ONLY, do not write a normal step-by-step
-  workflow for the requested action. Instead summarize what existing feature/page
-  was verified and identify the missing action evidence.
-- End with one short Expected Result line.
+    # FAIL-FAST GENERATION:
+    # Exactly one Groq request. No hedge, no fallback-model wait, no retry loop,
+    # no sleep, and no separate guide-generation call.
+    model_name = PRIMARY_MODEL
+    groq_started = time.time()
 
-Use project sources only to make the steps accurate.
-If something is not verified in the sources, clearly say so.
+    try:
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+        )
+        elapsed = time.time() - groq_started
+        print(f"GROQ TOTAL [{model_name}]: {elapsed:.2f} sec")
+        answer_text = (response.text or "").strip()
 
-Sources:
-{context}
+        if not answer_text:
+            raise ValueError("Groq returned an empty response.")
 
-Question:
-{question}
-"""
+        if needs_language_retry(answer_text, response_language):
+            print(
+                "Groq language warning; keeping the first response "
+                "instead of making another model call."
+            )
 
-    models_to_try = [
-        "gemini-3.5-flash-lite",
-        "gemini-3.6-flash",
-        "gemini-3.7-flash",
-    ]
+        if (
+            intent == PROJECT_CHANGE
+            and proposed_implementation_is_incomplete(answer_text)
+        ):
+            print(
+                "Implementation quality warning; keeping the verified first "
+                "response instead of making another model call."
+            )
 
-    last_error = None
+        if intent != PROJECT_CHANGE:
+            answer_text = re.split(
+                r"(?im)^####\s+Proposed implementation\s*$",
+                answer_text,
+                maxsplit=1,
+            )[0].rstrip()
 
-    for model_name in models_to_try:
-        for attempt in range(1, 4):
-            try:
-                start = time.time()
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                )
-                elapsed = time.time() - start
-                print(f"Gemini response time: {elapsed:.2f} seconds")
-                answer_text = (response.text or "").strip()
+        answer_text = normalize_answer_headings(answer_text)
 
+        scenario_marker = "### Practical Scenario Guide"
+        code_marker = "### Actual Project Code Flow"
 
-                if needs_language_retry(
-                    answer_text,
-                    response_language,
-                ):
-                    correction_prompt = prompt + f"""
+        if is_explanation_question(question):
+            if code_marker not in answer_text:
+                raise ValueError("Groq explanation omitted Actual Project Code Flow.")
+            return clean_assistant_display_text(inject_verified_code(
+                answer_text, code_cards, minimum_cards=minimum_code_cards
+            )), results
 
-LANGUAGE CORRECTION REQUIRED
-Your previous draft used the wrong answer language. Rewrite the complete
-answer now. Keep the two required Markdown headings exactly unchanged, but
-write every user-facing sentence below them in {response_language} only.
-Do not change, add, or remove any project facts or code placeholders.
-"""
-                    corrected_response = client.models.generate_content(
-                        model=model_name,
-                        contents=correction_prompt,
-                    )
-                    answer_text = (corrected_response.text or "").strip()
-                    if needs_language_retry(answer_text, response_language):
-                        raise ValueError(
-                            "Model did not satisfy the required response language."
-                        )
+        if (scenario_marker not in answer_text or code_marker not in answer_text):
+            raise ValueError("Groq response omitted a required answer section.")
 
-                if (
-                    intent == PROJECT_CHANGE
-                    and proposed_implementation_is_incomplete(answer_text)
-                ):
-                    implementation_retry_prompt = prompt + """
+        # Keep the guide clean locally; do not make a second AI request.
+        before_code, code_body = answer_text.split(code_marker, 1)
+        scenario_text = before_code.split(scenario_marker, 1)[1].strip()
 
-IMPLEMENTATION QUALITY CORRECTION REQUIRED
-The proposed implementation contains a TODO, placeholder, pass statement, or
-non-working stub. Rewrite the complete answer with a working implementation for
-the requested behavior. Keep verified project facts unchanged. For unknown page
-state/data names, make the helper accept data as an argument and label the call
-site assumption instead of inventing a project variable.
-"""
-                    corrected_response = client.models.generate_content(
-                        model=model_name,
-                        contents=implementation_retry_prompt,
-                    )
-                    answer_text = (corrected_response.text or "").strip()
-                    if proposed_implementation_is_incomplete(answer_text):
-                        raise ValueError(
-                            "Model returned an incomplete proposed implementation."
-                        )
+        scenario_text = re.sub(
+            r"```[A-Za-z0-9_+-]*\s*\n.*?```",
+            "",
+            scenario_text,
+            flags=re.DOTALL,
+        )
+        scenario_text = re.sub(
+            r"(?mi)^\s*(?:\*{0,2})?"
+            r"(?:File|Function/Class|Function|Symbol|Reference):.*$",
+            "",
+            scenario_text,
+        )
+        scenario_text = re.sub(
+            r"\n{3,}",
+            "\n\n",
+            scenario_text,
+        ).strip()
 
-                if intent != PROJECT_CHANGE:
-                    answer_text = re.split(
-                        r"(?im)^####\s+Proposed implementation\s*$",
-                        answer_text,
-                        maxsplit=1,
-                    )[0].rstrip()
+        answer_text = (
+            f"{scenario_marker}\n{scenario_text}\n\n"
+            f"{code_marker}\n{code_body.strip()}"
+        )
 
-                answer_text = normalize_answer_headings(answer_text)
-                has_required_sections = (
-                    "### Practical Scenario Guide" in answer_text
-                    and "### Actual Project Code Flow" in answer_text
-                )
+        # Deterministic accuracy guard: even if the model overclaims a submit
+        # action or frontend success state, remove it when the retrieved layer
+        # coverage does not verify that connection.
+        answer_text = sanitize_practical_guide(
+            answer_text,
+            evidence_coverage,
+        )
+        answer_text = replace_backend_guide_with_verified_capabilities(
+            answer_text,
+            question,
+            evidence_coverage,
+            verified_capabilities,
+        )
+        answer_text = sanitize_unverified_execution_claims(
+            answer_text,
+            evidence_coverage,
+        )
 
-                if not has_required_sections:
-                    scenario_response = client.models.generate_content(
-                        model=model_name,
-                        contents=scenario_prompt,
-                    )
-                    scenario_text = scenario_response.text.strip()
+        verified_answer = inject_verified_code(
+            answer_text,
+            code_cards,
+            minimum_cards=minimum_code_cards,
+        )
+        verified_answer = sanitize_code_flow_explanations(
+            verified_answer,
+            verified_capabilities,
+        )
+        verified_answer = enforce_displayed_evidence_boundary(
+            verified_answer,
+            question,
+        )
+        return clean_assistant_display_text(verified_answer), results
 
-                    if needs_language_retry(
-                        scenario_text,
-                        response_language,
-                    ):
-                        scenario_correction_prompt = (
-                            scenario_prompt
-                            + f"""
-
-LANGUAGE CORRECTION REQUIRED
-Rewrite the scenario guide in {response_language} only.
-Do not add headings, code, sources, or file paths.
-"""
-                        )
-                        scenario_response = client.models.generate_content(
-                            model=model_name,
-                            contents=scenario_correction_prompt,
-                        )
-                        scenario_text = scenario_response.text.strip()
-                        if needs_language_retry(
-                            scenario_text,
-                            response_language,
-                        ):
-                            raise ValueError(
-                                "Scenario guide did not satisfy the required language."
-                            )
-
-                    scenario_marker = "### Practical Scenario Guide"
-                    code_marker = "### Actual Project Code Flow"
-                    code_body = answer_text
-
-                    if code_marker in answer_text:
-                        code_body = answer_text.split(code_marker, 1)[1]
-                    elif scenario_marker in answer_text:
-                        scenario_text = answer_text.split(
-                            scenario_marker, 1
-                        )[1].strip()
-                        code_body = (
-                            "A separate code-flow section was not generated."
-                            if response_language == "English"
-                            else "Alag code-flow section generate nahi hua."
-                        )
-
-                    answer_text = (
-                        f"{scenario_marker}\n{scenario_text.strip()}\n\n"
-                        f"{code_marker}\n{code_body.strip()}"
-                    )
-
-                verified_answer = inject_verified_code(
-                    answer_text,
-                    code_cards,
-                    minimum_cards=minimum_code_cards,
-                )
-                return verified_answer, results
-
-            except Exception as error:
-                last_error = error
-                error_text = str(error)
-                print(
-                    f"Gemini error with {model_name}, "
-                    f"attempt {attempt}: {error}"
-                )
-
-                temporary_error = any(
-                    marker in error_text
-                    for marker in ("503", "UNAVAILABLE", "high demand")
-                )
-
-                if temporary_error and attempt < 3:
-                    time.sleep(5 * attempt)
-                    continue
-
-                break
-
-    raise last_error
-
+    except Exception as error:
+        elapsed = time.time() - groq_started
+        print(
+            f"GROQ FAILED [{model_name}] after {elapsed:.2f} sec: "
+            f"{type(error).__name__}: {error}"
+        )
+        print("Using verified MCP fallback immediately.")
+        return clean_assistant_display_text(build_verified_mcp_fallback_answer(question, results)), results
 
 def generate_project_prompt(question):
     response_language = get_response_language(question)
@@ -5663,7 +7726,7 @@ Return ONLY the coding prompt.
 """
 
     response = client.models.generate_content(
-        model="gemini-3.6-flash",
+        model=PRIMARY_MODEL,
         contents=generation_prompt,
     )
 
@@ -5695,7 +7758,7 @@ Return ONLY the corrected final prompt.
 """
 
     validation_response = client.models.generate_content(
-        model="gemini-3.6-flash",
+        model=PRIMARY_MODEL,
         contents=validation_prompt,
     )
 
@@ -5864,68 +7927,14 @@ for conversation in list_conversations():
 
 
 def render_message_copy_button(content, key, align="left"):
-    """Render a compact ChatGPT-style copy action immediately below a message."""
-    safe_text = html.escape(str(content or ""), quote=True)
-    safe_key = re.sub(r"[^a-zA-Z0-9_-]", "_", str(key))
-    justify = "flex-end" if align == "right" else "flex-start"
-
-    st.components.v1.html(
-        f"""
-        <div style="
-            height:24px;
-            display:flex;
-            justify-content:{justify};
-            align-items:flex-start;
-            margin-top:-2px;
-            margin-bottom:4px;
-            padding:0;
-        ">
-          <button
-            id="copy-{safe_key}"
-            title="Copy"
-            aria-label="Copy message"
-            onclick="copyMessage_{safe_key}()"
-            style="
-              width:28px;
-              height:24px;
-              display:inline-flex;
-              align-items:center;
-              justify-content:center;
-              padding:0;
-              margin:0;
-              border:0;
-              border-radius:6px;
-              background:transparent;
-              color:#9b9b9b;
-              cursor:pointer;
-            "
-            onmouseover="this.style.background='rgba(255,255,255,0.07)';this.style.color='#d6d6d6';"
-            onmouseout="this.style.background='transparent';this.style.color='#9b9b9b';"
-          >
-            <span id="copy-icon-{safe_key}" style="font-size:16px;line-height:1;">⧉</span>
-          </button>
-        </div>
-        <textarea id="copy-text-{safe_key}" style="display:none;">{safe_text}</textarea>
-        <script>
-          async function copyMessage_{safe_key}() {{
-            const text = document.getElementById("copy-text-{safe_key}").value;
-            const icon = document.getElementById("copy-icon-{safe_key}");
-            try {{
-              await navigator.clipboard.writeText(text);
-            }} catch (err) {{
-              const area = document.getElementById("copy-text-{safe_key}");
-              area.style.display = "block";
-              area.select();
-              document.execCommand("copy");
-              area.style.display = "none";
-            }}
-            icon.textContent = "✓";
-            setTimeout(() => icon.textContent = "⧉", 1200);
-          }}
-        </script>
-        """,
-        height=28,
-    )
+    """Native Streamlit copy UI; avoids custom iframe components."""
+    text_value = str(content or "")
+    if hasattr(st, "popover"):
+        with st.popover("⧉", help="Copy message"):
+            st.code(text_value, language=None)
+    else:
+        with st.expander("⧉ Copy"):
+            st.code(text_value, language=None)
 
 
 # Render the selected conversation above the sticky composer.
@@ -5955,7 +7964,7 @@ for message_index, message in enumerate(st.session_state["chat_history"]):
             "assistant",
             avatar=":material/auto_awesome:",
         ):
-            st.markdown(message["content"])
+            st.markdown(clean_assistant_display_text(message["content"]))
             render_message_copy_button(
                 message["content"],
                 f"history_assistant_{message_index}",
@@ -6003,16 +8012,30 @@ if question:
         "assistant",
         avatar=":material/auto_awesome:",
     ):
-        with st.spinner("AI is preparing your answer..."):
-            try:
-                answer, sources = ask_shipra_ai(question)
-            except Exception as error:
-                # Keep the failed user turn, but do not persist a fake AI answer.
-                st.error(
-                    f"AI request failed: {type(error).__name__}: {error}"
-                )
-                st.stop()
+        status_box = st.status(
+            "Checking Shipra...",
+            expanded=False,
+        )
+        try:
+            answer, sources = ask_shipra_ai(question)
+            status_box.update(
+                label="Done",
+                state="complete",
+                expanded=False,
+            )
+        except Exception as error:
+            status_box.update(
+                label="Request failed",
+                state="error",
+                expanded=False,
+            )
+            # Keep the failed user turn, but do not persist a fake AI answer.
+            st.error(
+                f"AI request failed: {type(error).__name__}: {error}"
+            )
+            st.stop()
 
+        answer = clean_assistant_display_text(answer)
         st.markdown(answer)
         render_message_copy_button(
             answer,
