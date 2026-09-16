@@ -1,5 +1,5 @@
 import os
-SHIPRA_ROUTER_VERSION = "v11-universal-workflow-fixed"
+SHIPRA_ROUTER_VERSION = "v7-agentic"
 import sys
 import json
 import math
@@ -1560,26 +1560,13 @@ def tokenize(text):
 
 @st.cache_resource(show_spinner="Loading Shipra knowledge base...")
 def load_data():
-    app_dir = Path(__file__).resolve().parent
-    chunks_path = app_dir / "chunks.json"
-    metadata_path = app_dir / "metadata.json"
-    index_path = app_dir / "faiss.index"
-
-    required_files = (chunks_path, metadata_path, index_path)
-    missing_files = [str(path) for path in required_files if not path.is_file()]
-    if missing_files:
-        raise FileNotFoundError(
-            "Shipra knowledge-base files are missing beside the app: "
-            + ", ".join(missing_files)
-        )
-
-    with chunks_path.open("r", encoding="utf-8") as file:
+    with open("chunks.json", "r", encoding="utf-8") as file:
         chunks = json.load(file)
 
-    with metadata_path.open("r", encoding="utf-8") as file:
+    with open("metadata.json", "r", encoding="utf-8") as file:
         metadata = json.load(file)
 
-    index = faiss.read_index(str(index_path))
+    index = faiss.read_index("faiss.index")
     embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
     if len(chunks) != len(metadata):
@@ -3815,14 +3802,7 @@ def get_mcp_seed_queries(question, search_results):
         if entity_words:
             variants = [entity_words]
             singular = list(entity_words)
-            last = singular[-1].lower()
-            if last.endswith("ies") and len(last) > 4:
-                singular[-1] = singular[-1][:-3] + "y"
-                variants.append(singular)
-            elif last.endswith("ses") and len(last) > 4:
-                singular[-1] = singular[-1][:-2]
-                variants.append(singular)
-            elif last.endswith("s") and not last.endswith("ss") and len(last) > 3:
+            if singular[-1].lower().endswith("s") and len(singular[-1]) > 3:
                 singular[-1] = singular[-1][:-1]
                 variants.append(singular)
 
@@ -3834,17 +3814,10 @@ def get_mcp_seed_queries(question, search_results):
                 add(
                     entity_pascal,
                     prefix + entity_pascal,
-                    "Add" + entity_pascal,
-                    "Save" + entity_pascal,
-                    "Post" + entity_pascal,
                     entity_pascal + "Modal",
                     prefix + entity_pascal + "Modal",
-                    "Add" + entity_pascal + "Modal",
                     entity_pascal + "Form",
                     entity_pascal + "Page",
-                    entity_pascal + "Repository",
-                    prefix + entity_pascal + "Command",
-                    prefix + entity_pascal + "CommandHandler",
                 )
 
     # Reuse exact code identifiers already surfaced by indexed retrieval as
@@ -4093,35 +4066,6 @@ def get_request_semantic_contract(question):
     }
 
 
-def get_concept_variants(concept):
-    """Return conservative lexical/code-name variants for one business concept."""
-    raw = str(concept or "").strip().lower()
-    if not raw:
-        return set()
-
-    variants = {raw}
-
-    # Common English plural normalization used in feature names:
-    # sales -> sale, inventories -> inventory, categories -> category, orders -> order.
-    if raw.endswith("ies") and len(raw) > 4:
-        variants.add(raw[:-3] + "y")
-    elif raw.endswith("ses") and len(raw) > 4:
-        variants.add(raw[:-2])
-    elif raw.endswith("s") and not raw.endswith("ss") and len(raw) > 3:
-        variants.add(raw[:-1])
-
-    # Preserve compact code-identifier matching.
-    return {v for v in variants if v}
-
-
-def concept_matches_searchable(concept, searchable, tokens):
-    variants = get_concept_variants(concept)
-    return any(
-        variant in tokens or variant in searchable
-        for variant in variants
-    )
-
-
 def evidence_matches_request(item, question):
     if item.get("source_type") == "mock_data":
         return True
@@ -4148,18 +4092,10 @@ def evidence_matches_request(item, question):
     concepts=contract["concepts"]; action=contract["action"]; searchable=path+"\n"+str(item.get("symbol") or "").lower()+"\n"+body
     tokens=tokenize(searchable)
     if concepts:
-        matched = {
-            c for c in concepts
-            if concept_matches_searchable(c, searchable, tokens)
-        }
-        required = 1 if len(concepts) == 1 else max(2, len(set(concepts)) - 1)
-        if len(matched) < required:
-            return False
-        if (
-            re.search(r"\borders?\b", str(question or "").lower())
-            and not concept_matches_searchable("order", searchable, tokens)
-        ):
-            return False
+        matched={c for c in concepts if c in tokens or c in searchable}
+        required=1 if len(concepts)==1 else max(2,len(set(concepts))-1)
+        if len(matched)<required: return False
+        if re.search(r"\borders?\b",str(question or "").lower()) and "order" not in searchable: return False
     markers={"create":("create","add","generate","save","submit","post"),"update":("update","edit","modify","patch","put"),"delete":("delete","remove"),"assign":("assign","apply","allocate"),"connect":("connect","connection","activate","link"),"sync":("sync","synchron"),"export":("export","csv","excel","download"),"import":("import","upload"),"filter":("filter","search"),"track":("track","tracking"),"validate":("validat",)}
     if action in markers:
         has_action=any(m in searchable for m in markers[action])
@@ -4251,7 +4187,7 @@ Do not mix creating a label with assigning a label to orders.
 For existing UI flows, inspect the page/modal and relevant called functions.
 Read additional lines when validation or response handling is cut off.
 Each read may contain at most 120 lines.
-You have at most 18 turns. Prioritize decisive evidence.
+You have at most 12 turns. Prioritize decisive evidence.
 Indexed leads are search hints, not live evidence or guaranteed paths.
 For UI usage questions, prioritize the matching frontend page/modal.
 Read the relevant function, then search its exact API call name.
@@ -4286,28 +4222,9 @@ GLOBAL VERIFICATION RULES:
 - Preserve actual execution order from the code.
 - If only part of the requested workflow can be verified, collect that part and
   finish. Do not fill missing layers with related-looking files.
-- Read/query/export handlers for an entity do NOT prove that create/update/delete
-  operations are absent. For a requested mutation, explicitly search mutation
-  identifiers (for example Create<Entity>, Add<Entity>, Save<Entity>, Post<Entity>,
-  matching frontend handlers/API helpers, and repository methods) before finishing.
-- Never state "feature does not exist", "no existing feature", or equivalent from
-  incomplete retrieval. State only which requested operation could not be verified
-  from the searched evidence, while preserving any layers that were verified.
 - Before concluding that a feature is missing, search exact wording, likely
   camel/pascal-case identifiers, page names, and exact API names derived from
   the question.
-- For create/update/delete/assign/connect/sync workflow questions, expand in
-  both directions before finishing: frontend page/modal -> event handler ->
-  imported API helper/endpoint, and command/query -> handler ->
-  repository/service/persistence. Use find_references/trace_call_chain when a
-  strong symbol is available.
-- Compound entity names must tolerate ordinary plural wording when matching
-  code identifiers (for example "inventory sales" may map to InventorySale), while
-  still requiring the requested operation to match.
-- A verified frontend file whose path directly names the requested entity is
-  high-priority evidence. Read its relevant handler before claiming no UI exists.
-- If one layer cannot be verified, report only that layer as unverified. Do not
-  discard verified layers or declare the whole feature missing.
 - Do not propose new implementation code while collecting evidence.
 
 Use conversation only to resolve follow-ups; ignore it for a new topic.
@@ -4558,19 +4475,10 @@ Finish when sufficient verified evidence is collected or the exact search is exh
         bootstrap_matches = []
 
         for seed_query in seed_queries:
-            seed_arguments = {"query": seed_query, "max_results": 30}
-            seed_call_key = "search_code" + json.dumps(
-                seed_arguments,
-                sort_keys=True,
-            )
-            if seed_call_key in completed_calls:
-                continue
-            completed_calls.add(seed_call_key)
-
             try:
                 seed_result = await mcp_client.call_tool(
                     "search_code",
-                    seed_arguments,
+                    {"query": seed_query, "max_results": 30},
                 )
 
                 if seed_result.is_error:
@@ -4738,7 +4646,12 @@ Finish when sufficient verified evidence is collected or the exact search is exh
             return prune_mcp_evidence(evidence, question, seed_queries)
 
         planner_failures = 0
-        for _ in range(18):
+        # The previous seven LLM-planner rounds made ordinary questions slow
+        # and also increased the chance that a weak planner wandered into a
+        # neighbouring feature.  Bootstrap reads are deterministic and already
+        # provide the strongest evidence; use only a small number of follow-up
+        # rounds to trace an exact identifier across layers.
+        for _ in range(3):
             try:
                 response = await asyncio.to_thread(
                     client.models.generate_content,
@@ -4832,42 +4745,21 @@ Finish when sufficient verified evidence is collected or the exact search is exh
                 "trace_call_chain",
             }
             if tool not in allowed_tools:
-                transcript.append({
-                    "status": "planner_request_rejected",
-                    "message": "Unsupported MCP tool requested by planner.",
-                    "tool": tool,
-                })
-                continue
+                raise ValueError("Unsupported MCP tool")
 
             if not isinstance(arguments, dict):
-                transcript.append({
-                    "status": "planner_request_rejected",
-                    "message": "Planner arguments must be a JSON object.",
-                    "tool": tool,
-                })
-                continue
+                raise ValueError("Invalid MCP tool arguments")
 
             if tool == "search_code":
                 query = str(arguments.get("query", "")).strip()
                 if len(query) < 3:
-                    transcript.append({
-                        "status": "planner_request_rejected",
-                        "tool": "search_code",
-                        "message": "MCP search term is too short.",
-                        "query": query,
-                    })
-                    continue
+                    raise ValueError("MCP search term is too short")
                 arguments = {"query": query, "max_results": 30}
 
             elif tool == "find_mock_order":
                 order_no = str(arguments.get("order_no", "")).strip()
                 if not order_no:
-                    transcript.append({
-                        "status": "planner_request_rejected",
-                        "tool": "find_mock_order",
-                        "message": "Mock order number is required.",
-                    })
-                    continue
+                    raise ValueError("Mock order number is required")
                 arguments = {"order_no": order_no}
 
             elif tool == "search_mock_orders":
@@ -4911,34 +4803,19 @@ Finish when sufficient verified evidence is collected or the exact search is exh
             elif tool == "find_symbol":
                 symbol_name = str(arguments.get("symbol_name", "")).strip()
                 if not symbol_name:
-                    transcript.append({
-                        "status": "planner_request_rejected",
-                        "tool": "find_symbol",
-                        "message": "Symbol name is required.",
-                    })
-                    continue
+                    raise ValueError("Symbol name is required")
                 arguments = {"symbol_name": symbol_name}
 
             elif tool == "find_references":
                 symbol_name = str(arguments.get("symbol_name", "")).strip()
                 if not symbol_name:
-                    transcript.append({
-                        "status": "planner_request_rejected",
-                        "tool": "find_references",
-                        "message": "Symbol name is required.",
-                    })
-                    continue
+                    raise ValueError("Symbol name is required")
                 arguments = {"symbol_name": symbol_name}
 
             elif tool == "trace_call_chain":
                 entry_symbol = str(arguments.get("entry_symbol", "")).strip()
                 if not entry_symbol:
-                    transcript.append({
-                        "status": "planner_request_rejected",
-                        "tool": "trace_call_chain",
-                        "message": "Entry symbol is required.",
-                    })
-                    continue
+                    raise ValueError("Entry symbol is required")
                 arguments = {"entry_symbol": entry_symbol}
 
             elif tool == "read_file":
@@ -4970,17 +4847,8 @@ Finish when sufficient verified evidence is collected or the exact search is exh
                     })
                     continue
 
-                try:
-                    start_line = max(1, int(arguments.get("start_line", 1)))
-                    end_line = int(arguments.get("end_line", start_line + 119))
-                except (TypeError, ValueError):
-                    transcript.append({
-                        "status": "planner_request_rejected",
-                        "tool": "read_file",
-                        "message": "start_line/end_line must be integers.",
-                    })
-                    continue
-
+                start_line = max(1, int(arguments.get("start_line", 1)))
+                end_line = int(arguments.get("end_line", start_line + 119))
                 arguments = {
                     "file_path": path,
                     "start_line": start_line,
@@ -5662,28 +5530,26 @@ def build_verified_evidence_gap_answer(question):
     if response_language == "Roman Urdu":
         return (
             "### Practical Scenario Guide\n"
-            "Requested Shipra operation ka exact end-to-end flow searched project "
-            "evidence se verify nahi ho saka. Is ka matlab yeh nahi ke feature "
-            "project mein exist nahi karta; sirf requested operation ki complete "
-            "connected evidence verify nahi hui.\n\n"
+            "Requested Shipra feature ka exact verified usage flow available "
+            "source code se confirm nahi ho saka. Main related-looking files ko "
+            "actual workflow ka hissa assume nahi kar raha.\n\n"
             "### Actual Project Code Flow\n"
-            "Jo layers MCP se verify hui hain unhein evidence ke sath dikhaya jayega. "
-            "Jo specific layer ya operation verify nahi hui, sirf usi ko unverified "
-            "mark kiya jayega; related query/export/read code ko create/update/delete "
-            "operation ka proof ya absence proof assume nahi kiya jayega."
+            "MCP exact-code verification requested entity aur operation ke liye "
+            "sufficient connected evidence collect nahi kar saki. Is liye "
+            "unsupported screen steps, API calls, controllers, handlers, ya "
+            "database behavior invent nahi kiya gaya."
         )
 
     return (
         "### Practical Scenario Guide\n"
-        "The requested Shipra operation could not be verified end-to-end from the "
-        "searched project evidence. This does not establish that the feature is "
-        "absent; it only means complete connected evidence for the requested "
-        "operation was not verified.\n\n"
+        "The exact usage flow for the requested Shipra feature could not be "
+        "verified from the available source code. Related-looking files are not "
+        "being treated as part of the workflow without a proven connection.\n\n"
         "### Actual Project Code Flow\n"
-        "Verified layers should still be shown with their evidence. Only the "
-        "specific unverified layer or operation should be marked unverified; "
-        "related query/export/read code must not be treated as proof of a mutation "
-        "or as proof that the mutation does not exist."
+        "MCP exact-code verification did not collect sufficient connected "
+        "evidence for the requested entity and operation. Unsupported screen "
+        "steps, API calls, controllers, handlers, or database behavior are "
+        "therefore not being invented."
     )
 
 
@@ -6133,40 +5999,18 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
 
     # ---- Inventory ----
     elif "inventory" in q:
-        inventory_sales_question = bool(
-            re.search(r"\binventory\s+sales?\b|\bsales?\s+inventory\b", q)
-        )
-
-        if inventory_sales_question:
-            if has("inventorysale") and has("shipra.frontend", "/pages/"):
-                steps.append("Open the verified Shipra frontend area for **Inventory Sales**.")
-            if has("createinventorysale", "addinventorysale", "saveinventorysale", "postinventorysale"):
-                steps.append("Use the verified Inventory Sales creation action shown in the source evidence.")
-            if has("inventorysale") and not has(
-                "createinventorysale", "addinventorysale", "saveinventorysale", "postinventorysale"
-            ):
-                steps.append(
-                    "Inventory Sales-related code was verified, but the displayed evidence does not "
-                    "verify the requested create action; no create steps are inferred from query/export code."
-                )
-            expected = (
-                "Only the Inventory Sales creation behavior directly verified by the retrieved "
-                "frontend/backend evidence is confirmed."
-            )
-        elif has("inventorysale", "product inventory"):
+        if has("inventorysale", "product inventory"):
             steps.append("Open the relevant **Product Inventory** screen in Shipra.")
-
-        if not inventory_sales_question and has("editinventorymodal", "updateproductstockquantitybyreason"):
+        if has("editinventorymodal", "updateproductstockquantitybyreason"):
             steps.append("Select the inventory item whose stock quantity you want to update and open the inventory edit action.")
             if has('name: "reason"', "transactiontypeid"):
                 steps.append("Select the applicable stock adjustment reason.")
             if has('name: "quantity"', "quantity: parsefloat"):
                 steps.append("Enter the quantity to adjust and add a comment if required.")
             steps.append("Submit the stock update and verify the refreshed inventory quantity.")
-        if not inventory_sales_question and has("syncinventorymodal", "salechannelinventorysync"):
+        if has("syncinventorymodal", "salechannelinventorysync"):
             steps.append("If inventory synchronization is required, choose the sale channel/configuration and run the inventory sync.")
-        if not inventory_sales_question:
-            expected = "The selected inventory operation is completed and the inventory view is refreshed with the verified result."
+        expected = "The selected inventory operation is completed and the inventory view is refreshed with the verified result."
 
     # Generic evidence-based fallback: do NOT pretend generic actions are exact.
     if not steps:
@@ -7367,7 +7211,9 @@ def ask_shipra_project_ai(question, intent):
 
     # SPEED: keep full verified MCP results for code injection/fallback, but limit
     # only the text sent to Groq. This reduces prompt/token processing latency.
-    MAX_GROQ_CONTEXT_CHARS = 16000
+    # Keep the final answer grounded but leave room for the model to reason.
+    # A very large mixed context was a common reason for vague answers.
+    MAX_GROQ_CONTEXT_CHARS = 12000
     if len(context) > MAX_GROQ_CONTEXT_CHARS:
         context = context[:MAX_GROQ_CONTEXT_CHARS]
         print(
@@ -8088,14 +7934,60 @@ for conversation in list_conversations():
 
 
 def render_message_copy_button(content, key, align="left"):
-    """Native Streamlit copy UI; avoids custom iframe components."""
+    import streamlit.components.v1 as components
+    import json
+
     text_value = str(content or "")
-    if hasattr(st, "popover"):
-        with st.popover("⧉", help="Copy message"):
-            st.code(text_value, language=None)
-    else:
-        with st.expander("⧉ Copy"):
-            st.code(text_value, language=None)
+    text_json = json.dumps(text_value)
+
+    components.html(
+        f"""
+        <div style="
+            display:flex;
+            justify-content:{'flex-end' if align == 'right' else 'flex-start'};
+            margin:0;
+            padding:0;
+            height:30px;
+        ">
+            <button
+                id="copy-btn"
+                title="Copy"
+                onclick='copyText()'
+                style="
+                    background:transparent;
+                    border:none;
+                    color:#aeb2b8;
+                    cursor:pointer;
+                    padding:3px 5px;
+                    margin:0;
+                    border-radius:6px;
+                    font-size:18px;
+                    line-height:20px;
+                "
+                onmouseover="this.style.background='rgba(255,255,255,0.08)'; this.style.color='#ffffff';"
+                onmouseout="this.style.background='transparent'; this.style.color='#aeb2b8';"
+            >
+                ⧉
+            </button>
+        </div>
+
+        <script>
+            function copyText() {{
+                navigator.clipboard.writeText({text_json}).then(() => {{
+                    const btn = document.getElementById("copy-btn");
+                    btn.innerHTML = "✓";
+                    btn.title = "Copied";
+
+                    setTimeout(() => {{
+                        btn.innerHTML = "⧉";
+                        btn.title = "Copy";
+                    }}, 1200);
+                }});
+            }}
+        </script>
+        """,
+        height=30,
+    )
 
 
 # Render the selected conversation above the sticky composer.
@@ -8129,6 +8021,7 @@ for message_index, message in enumerate(st.session_state["chat_history"]):
             render_message_copy_button(
                 message["content"],
                 f"history_assistant_{message_index}",
+                align="left",
             )
 
 
@@ -8227,4 +8120,3 @@ if question:
 
     # Rerun so the sidebar title/order and the full transcript refresh cleanly.
     st.rerun()
-
