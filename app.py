@@ -7045,48 +7045,54 @@ def ask_shipra_project_ai(question, intent):
 
 
     # ------------------------------------------------------------------
-    # MCP-FIRST RETRIEVAL
+    # RAG-FIRST DISCOVERY -> MCP VERIFICATION
     # ------------------------------------------------------------------
-    # First attempt exact live-code discovery with no semantic/index hints.
-    # RAG is used only as a discovery fallback, and its snippets are never
-    # passed to the final answer unless MCP independently reads/verifies them.
+    # FAISS is best at translating a user's natural-language wording into the
+    # real file/function names in the 4,768 indexed Shipra code chunks.  MCP
+    # then searches and reads those candidates from the currently deployed
+    # raw source.  RAG is therefore a discovery layer, never final evidence.
+    rag_candidates = []
+    try:
+        rag_started = time.time()
+        raw_rag_candidates = search_documentation(search_question, top_k=16)
+        filtered_rag_candidates = filter_relevant_results(
+            raw_rag_candidates,
+            search_question,
+        )
+        # Do not let a strict lexical filter erase all semantic leads.
+        rag_candidates = filtered_rag_candidates or raw_rag_candidates
+        print(
+            f"RAG DISCOVERY: {len(rag_candidates)} candidates in "
+            f"{time.time() - rag_started:.2f} sec"
+        )
+    except Exception as rag_error:
+        print(f"RAG DISCOVERY FAILED: {type(rag_error).__name__}: {rag_error}")
+
     mcp_results = []
     primary_mcp_error = None
-
     try:
         mcp_started = time.time()
         mcp_results = asyncio.run(
             collect_mcp_evidence(
                 question,
                 conversation_text,
-                [],
+                rag_candidates,
             )
         )
-        print(f"MCP PRIMARY TOTAL: {time.time() - mcp_started:.2f} sec")
+        print(
+            f"MCP VERIFICATION: {len(mcp_results)} verified sections in "
+            f"{time.time() - mcp_started:.2f} sec"
+        )
     except Exception as error:
         primary_mcp_error = error
 
-    rag_candidates = []
-
-    if not mcp_results:
-        # MCP exact discovery did not find enough evidence. Use RAG only to
-        # suggest candidate identifiers/paths, then ask MCP to verify them.
-        rag_candidates = search_documentation(
-            search_question,
-            top_k=8,
-        )
-        rag_candidates = filter_relevant_results(
-            rag_candidates,
-            search_question,
-        )
-
+    # If the index is missing/stale and produced no candidates, retain a raw
+    # MCP-only fallback.  This keeps the assistant usable while preserving the
+    # normal RAG-first retrieval order.
+    if not rag_candidates and not mcp_results:
         try:
             mcp_results = asyncio.run(
-                collect_mcp_evidence(
-                    question,
-                    conversation_text,
-                    rag_candidates,
-                )
+                collect_mcp_evidence(question, conversation_text, [])
             )
         except Exception as fallback_error:
             if primary_mcp_error is None:
@@ -7304,6 +7310,16 @@ or success outcome as an existing Shipra behaviour unless the supplied excerpt
 directly verifies it.  Label every new step and every new code block as
 proposed.  An import by itself is only a reusable visual reference; it does not
 prove a control is rendered or that any delete operation exists.
+When the exact target component and its matching API/backend flow were NOT
+retrieved, do not fabricate Shipra file paths, folders, imports, Redux hooks,
+toast helpers, HTTP clients, endpoints, controller base classes, dispatchers,
+commands, repositories, or entity property names.  Do not call such code
+"end-to-end" or "minimal".  Instead state that an exact Shipra patch cannot
+be generated from the available evidence and give only a short implementation
+checklist of the source files that must be retrieved first.  Generic example
+code is allowed only if clearly headed "Generic example — not verified Shipra
+code", uses placeholders such as <station-id>, and makes no Shipra-specific
+claim.
 
 Answer directly. Do not output CLARIFICATION or ask the user to choose
 components or implementation details. State a reasonable assumption if needed.
@@ -7509,6 +7525,10 @@ is project_change:
 - Provide a Proposed implementation for the requested change.
 - Include suggested placement, imports, integration steps, and a simple test.
 - Clearly label unverified imports, dependencies, and sample data.
+- If the exact target UI file plus its project API convention were not
+  retrieved, replace the Proposed implementation with a `#### Required source
+  evidence` checklist. Do not invent placement, imports, endpoints, or backend
+  types merely to fill this section.
 
 If the user asks how to USE an existing feature and evidence is incomplete:
 - Do NOT add a Proposed implementation.
