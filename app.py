@@ -2897,6 +2897,131 @@ def get_codebase_lookup_queries(question):
 
     return queries[:8]
 
+
+def is_data_aggregate_question(question):
+    """
+    Universal detector for factual aggregate questions over Shipra business data.
+    Covers English, Roman Urdu, Urdu script, code-switching, common spelling variants.
+    Examples: how many orders are delivered, kitny pending hain, total returns?,
+    delivered orders count, کتنے آرڈرز ڈیلیور ہو گئے ہیں؟
+    """
+    raw = str(question or "").strip()
+    q = _normalize_intent_text(raw)
+    padded = f" {q} "
+
+    count_signals = (
+        "how many", "count", "total", "number of", "no of", "no. of",
+        "kitny", "kitne", "kitni", "kitnay", "kitna", "kity",
+        "kinti", "ktny", "ktny", "ginti", "tadaad", "taadad",
+        "کتنے", "کتنی", "تعداد", "کل",
+    )
+    business_entities = (
+        "order", "orders", "return", "returns", "shipment", "shipments",
+        "product", "products", "inventory", "inventories", "customer", "customers",
+        "invoice", "invoices", "payment", "payments", "parcel", "parcels",
+        "sale", "sales", "delivery", "deliveries", "stock", "stocks",
+        " آرڈر", " آرڈرز", " ریٹرن", " شپمنٹ", " پروڈکٹ", " انوینٹری",
+        " کسٹمر", " انوائس", " پیمنٹ", " پارسل", " سیل",
+    )
+    status_signals = (
+        "delivered", "deliver", "delivery", "deliverd", "delivred",
+        "pending", "pendng", "processing", "processed", "cancelled", "canceled",
+        "cancel", "returned", "return", "approved", "rejected", "failed",
+        "completed", "complete", "created", "shipped", "dispatch", "dispatched",
+        "fulfilled", "unfulfilled", "paid", "unpaid", "active", "inactive",
+        "deliver ho", "deliver hog", "deliver hu", "delivered ho",
+        "ho gay", "ho gye", "ho gae", "ho chuk", "reh gay", "baqi",
+        "ڈیلیور", "پینڈنگ", "کینسل", "ریٹرن", "مکمل", "باقی",
+    )
+
+    has_count = any(s in q for s in count_signals)
+    has_entity = any(s in padded for s in business_entities)
+    has_status = any(s in q for s in status_signals)
+
+    # Explicit count + business entity is sufficient; status is optional.
+    if has_count and has_entity:
+        return True
+
+    # Natural shorthand: "delivered orders?" / "pending kitny?".
+    shorthand_count = bool(re.search(
+        r"\b(?:delivered|pending|cancelled|canceled|returned|processing|shipped|paid|unpaid)\b.*\b(?:kitn\w*|count|total)\b"
+        r"|\b(?:kitn\w*|count|total)\b.*\b(?:delivered|pending|cancelled|canceled|returned|processing|shipped|paid|unpaid)\b",
+        q
+    ))
+    return bool(shorthand_count and (has_entity or has_status))
+
+
+def get_data_query_contract(question):
+    """Extract a conservative entity/status contract without inventing DB schema."""
+    q = _normalize_intent_text(question)
+    entity_aliases = {
+        "orders": ("order", "orders", " آرڈر", " آرڈرز"),
+        "returns": ("return", "returns", " ریٹرن"),
+        "shipments": ("shipment", "shipments", "parcel", "parcels", " شپمنٹ", " پارسل"),
+        "products": ("product", "products", " پروڈکٹ"),
+        "inventory": ("inventory", "inventories", "stock", "stocks", " انوینٹری"),
+        "customers": ("customer", "customers", " کسٹمر"),
+        "invoices": ("invoice", "invoices", " انوائس"),
+        "payments": ("payment", "payments", " پیمنٹ"),
+        "sales": ("sale", "sales", " سیل"),
+    }
+    status_aliases = {
+        "delivered": ("delivered", "deliverd", "delivred", "deliver ho", "deliver hog", "deliver hu", "ڈیلیور"),
+        "pending": ("pending", "pendng", "baqi", "reh gay", "پینڈنگ", "باقی"),
+        "cancelled": ("cancelled", "canceled", "cancel", "کینسل"),
+        "returned": ("returned", "return ho", "ریٹرن"),
+        "processing": ("processing", "processed"),
+        "completed": ("completed", "complete", "mukamal", "مکمل"),
+        "shipped": ("shipped", "dispatch", "dispatched"),
+        "approved": ("approved",),
+        "rejected": ("rejected",),
+        "failed": ("failed",),
+        "paid": ("paid",),
+        "unpaid": ("unpaid",),
+        "active": ("active",),
+        "inactive": ("inactive",),
+    }
+    entity = next((name for name, aliases in entity_aliases.items() if any(a in q for a in aliases)), None)
+    status = next((name for name, aliases in status_aliases.items() if any(a in q for a in aliases)), None)
+    return {"entity": entity, "status": status, "operation": "count"}
+
+
+def build_data_query_answer(question, results):
+    """
+    Render factual aggregate results only from connected runtime/mock data evidence.
+    Never turn a data question into a code workflow and never fabricate a count.
+    """
+    contract = get_data_query_contract(question)
+    entity = contract.get("entity") or "records"
+    status = contract.get("status")
+    roman = get_response_language(question) != "English"
+
+    # Prefer structured mock/runtime evidence already returned by the project pipeline.
+    answer = answer_from_mock_data(
+        question,
+        results,
+        get_response_language(question),
+    )
+    if answer:
+        return clean_assistant_display_text(answer)
+
+    # No count evidence: explicitly distinguish availability from project-code evidence.
+    if roman:
+        target = f"{status} {entity}".strip() if status else entity
+        return (
+            f"### Data Query\n\n"
+            f"`{target}` ka exact count current connected data evidence se verify nahi ho saka. "
+            "Main project code dekh kar live business-data count guess nahi karunga. "
+            "Live/read-only database ya relevant runtime dataset connected ho to isi query ka exact count return kiya ja sakta hai."
+        )
+    target = f"{status} {entity}".strip() if status else entity
+    return (
+        "### Data Query\n\n"
+        f"The exact count for `{target}` could not be verified from the currently connected data evidence. "
+        "I will not infer a live business-data count from source code. "
+        "With a connected read-only production database or relevant runtime dataset, this query can return the exact count."
+    )
+
 def detect_request_profile(question):
     """Deterministically identify Shipra scope, entity, action, and request mode."""
     raw = str(question or "").strip()
@@ -2906,6 +3031,18 @@ def detect_request_profile(question):
         "why using", "why use", "what does", "what is", "explain",
         "purpose of", "used for", "use of", "working of", "kis liye", "kyun", "q use"
     ))
+
+    # Business-data aggregate lookup: counts/totals/status questions are data queries,
+    # never Practical Scenario workflows.
+    if is_data_aggregate_question(raw):
+        contract = get_data_query_contract(raw)
+        return {
+            "scope": "data",
+            "mode": "data_query",
+            "action": "count",
+            "entity": contract.get("entity") or raw,
+            "status": contract.get("status"),
+        }
 
     # Exact codebase-location lookup: "DI kahan hai?", "where is JWT configured?", etc.
     if is_codebase_location_question(raw):
@@ -6774,6 +6911,12 @@ def ask_shipra_project_ai(question, intent):
             cache.pop(next(iter(cache)))
         return location_answer, results
 
+    # DATA QUERY FAST RENDER:
+    # Counts/totals/status questions are answered from connected data evidence,
+    # never from source-code workflow inference.
+    if is_data_aggregate_question(question):
+        return build_data_query_answer(question, results), results
+
     mock_answer = answer_from_mock_data(
         question,
         results,
@@ -7003,6 +7146,13 @@ If existing functionality directly supports the requested operation:
 - Explain how to use it and trace its existing code.
 - Do not add a Proposed implementation section for a usage question.
 - Do not create a replacement form, service, or API wrapper unnecessarily.
+
+DATA / AGGREGATE QUESTION RULES:
+- HOW MANY / COUNT / TOTAL / KITNY / KITNE / کتنے questions about orders, returns, shipments, products, inventory, customers, invoices, payments or sales are DATA_QUERY intents.
+- Status wording may be English, Roman Urdu, Urdu script, code-switched, misspelled, or paraphrased (delivered, deliver ho gay, pending, cancelled, returned, shipped, etc.).
+- NEVER output `Practical Scenario Guide`, UI navigation, code workflow, or inferred database counts for DATA_QUERY.
+- Use only connected runtime/mock/database evidence for the number.
+- If no data evidence is connected, clearly say the exact count cannot be verified; never derive a live count from repository source code.
 
 CODEBASE LOCATION QUESTION RULES:
 - WHERE/KAHAN/KIDHAR/KIS FILE/KIS JAGA questions about project code are direct codebase lookups, not user workflows.
