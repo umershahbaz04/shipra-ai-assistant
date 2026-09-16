@@ -1,4 +1,5 @@
 import os
+SHIPRA_ROUTER_VERSION = "v7-agentic"
 import sys
 import json
 import math
@@ -3111,6 +3112,9 @@ Rules:
 - Asking how an existing Shipra feature/process works or is performed => project_workflow.
 - Asking why/what a specific code/file/function does => code_explanation.
 - Never invent project facts, file paths, database values, or counts.
+- Route by the user's intended meaning, not literal keywords.
+- A request for current/business values must use data_query even when the status is paraphrased.
+- A request about source structure/location/workflow must use project evidence.
 - If unclear, choose general with low confidence.
 
 User question:
@@ -3197,6 +3201,37 @@ def get_cached_hybrid_route(question):
     while len(cache) > 100:
         cache.pop(next(iter(cache)))
     return route
+
+
+def resolve_authoritative_route(question):
+    """
+    Choose exactly one execution route for the request.
+    LLM is used for semantic understanding; MCP/runtime data remains the authority
+    for project facts and business values.
+    """
+    route = get_cached_hybrid_route(question)
+    intent = str(route.get("intent") or "general")
+
+    # Upgrade semantic data routes with canonical entity/status information.
+    if intent == "data_query":
+        contract = get_data_query_contract(question)
+        route = dict(route)
+        route["entity"] = contract.get("entity") or route.get("entity")
+        route["status"] = contract.get("status") or route.get("status")
+        route["action"] = route.get("action") or "count"
+
+    return route
+
+
+def route_requires_project_evidence(route):
+    return str((route or {}).get("intent")) in {
+        "codebase_location", "architecture_guidance",
+        "project_workflow", "code_explanation",
+    }
+
+
+def route_requires_runtime_data(route):
+    return str((route or {}).get("intent")) == "data_query"
 
 def detect_request_profile(question):
     """Deterministically identify Shipra scope, entity, action, and request mode."""
@@ -5569,6 +5604,12 @@ def detect_order_count_status(question):
     if re.search(r"\bcod\s+pending\b", text):
         return None
 
+    # First normalize natural outcome paraphrases ("customer ko pohanchne wale",
+    # "received by customer", etc.) into the canonical business status.
+    semantic_status = normalize_business_status_semantically(question)
+    if semantic_status:
+        return semantic_status
+
     aliases = (
         ("on the way", ("on the way", "ontheway", "in transit", "intransit")),
         ("ready for assignment", ("ready for assignment", "readyforassignment")),
@@ -6883,8 +6924,9 @@ def _get_location_answer_cache():
 
 
 def ask_shipra_project_ai(question, intent):
-    # Hybrid semantic route is cached. Deterministic fast paths remain authoritative.
-    hybrid_route = get_cached_hybrid_route(question)
+    # ONE authoritative semantic route per user turn.
+    # Downstream retrieval/rendering must obey this route.
+    hybrid_route = resolve_authoritative_route(question)
     # ARCHITECTURE FAST PATH:
     # These are project-structure guidance questions, not end-user workflows.
     # Answer deterministically before history retrieval, MCP startup, RAG, or Groq.
@@ -6918,6 +6960,13 @@ def ask_shipra_project_ai(question, intent):
     # before source-code retrieval. This prevents "pending" from drifting into
     # unrelated COD-pending handlers or other semantic source matches.
     order_count_status = detect_order_count_status(question)
+    if (
+        not order_count_status
+        and hybrid_route.get("intent") == "data_query"
+        and str(hybrid_route.get("entity") or "").lower() in {"order", "orders"}
+    ):
+        order_count_status = hybrid_route.get("status")
+
     if order_count_status:
         try:
             status_result = asyncio.run(
@@ -6942,6 +6991,19 @@ def ask_shipra_project_ai(question, intent):
         return (
             "I couldn't retrieve the current order count from verified MCP data. "
             "I won't infer the count from source-code snippets."
+        ), []
+
+    # AUTHORITATIVE DATA-ROUTE GUARD:
+    # A business-data question must never drift into code/workflow retrieval.
+    if route_requires_runtime_data(hybrid_route):
+        if response_language == "Roman Urdu":
+            return (
+                "Is sawal ka exact jawab current connected runtime/database evidence se "
+                "verify nahi ho saka. Main source code se business data guess nahi karunga."
+            ), []
+        return (
+            "The exact answer could not be verified from the currently connected "
+            "runtime/database evidence. I won't infer business data from source code."
         ), []
 
     # Validate raw source availability before code-flow retrieval. Mock-data
