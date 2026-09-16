@@ -5547,6 +5547,153 @@ def build_evidence_coverage(question, results):
 
 
 
+def build_verified_capabilities(results):
+    """Derive conservative capabilities from exact retrieved executable snippets."""
+    joined = "\n".join(
+        str(item.get("content") or item.get("snippet") or item.get("text") or "")
+        for item in (results or [])
+    )
+    paths = [
+        str(item.get("file_path") or item.get("path") or "").replace("\\", "/").lower()
+        for item in (results or [])
+    ]
+
+    # Remove comments before executable-evidence checks so comments cannot prove behavior.
+    executable = re.sub(r"/\*.*?\*/", "", joined, flags=re.S)
+    executable = re.sub(r"//.*?$", "", executable, flags=re.M)
+
+    def has(pattern):
+        return bool(re.search(pattern, executable, flags=re.I | re.S))
+
+    caps = {
+        "frontend_verified": any("shipra.frontend/" in p for p in paths),
+        "http_route_verified": has(
+            r"\[(HttpGet|HttpPost|HttpPut|HttpDelete|Route)\b|"
+            r"\b(MapGet|MapPost|MapPut|MapDelete)\s*\("
+        ),
+        "sku_lookup_verified": has(r"GetProductBySKUAsync\s*\("),
+        "product_create_verified": has(r"CreateProductAsync\s*\("),
+        "store_link_verified": has(r"CreateStoreProduct\s*\("),
+        "variant_build_verified": has(r"GetProductVariants\s*\("),
+        "variant_persist_verified": has(r"CreateProductVariantsAsync\s*\("),
+        "inventory_build_verified": has(r"GetInventoryBalances\s*\("),
+        "inventory_persist_verified": has(
+            r"(Create|Add|Save|Update)InventoryBalance\w*\s*\("
+        ),
+        "history_create_verified": has(
+            r"(Create|Add|Save)\w*(StockHistory|InventoryHistory)\w*\s*\("
+        ),
+        "success_return_verified": has(
+            r"return\s+(response|serviceResult)\s*;"
+        ) and has(
+            r"(IsSuccess\s*=\s*true|Created Successfully|Updated Successfully|"
+            r"new\s+ServiceResultDTO\s*\(\s*new\s+BaseResponseDto)"
+        ),
+    }
+    return caps
+
+
+def build_evidence_driven_backend_guide(question, capabilities):
+    """Create a concise process guide only from positively verified capabilities."""
+    caps = capabilities or {}
+    q = (question or "").lower()
+    steps = []
+
+    # Product/inventory workflow capabilities.
+    if any(term in q for term in ("product", "inventory", "stock")):
+        if caps.get("sku_lookup_verified"):
+            steps.append(
+                "Shipra checks the supplied SKU against the current client's existing products."
+            )
+        if caps.get("product_create_verified"):
+            steps.append(
+                "When the visible creation branch is reached, Shipra creates the product record."
+            )
+        if caps.get("store_link_verified"):
+            steps.append(
+                "If a valid StoreId is present in the visible branch, Shipra creates the product-to-store association."
+            )
+        if caps.get("variant_build_verified"):
+            steps.append(
+                "Shipra builds product variants from the supplied ProductStocks data."
+            )
+        if caps.get("variant_persist_verified"):
+            steps.append(
+                "Shipra persists the generated product variants."
+            )
+        if caps.get("inventory_build_verified"):
+            steps.append(
+                "Shipra builds inventory-balance records from the generated variants and ProductStocks."
+            )
+        if caps.get("inventory_persist_verified"):
+            steps.append(
+                "Shipra persists the inventory-balance records."
+            )
+        if caps.get("history_create_verified"):
+            steps.append(
+                "Shipra creates the verified inventory/stock history records."
+            )
+
+    if not steps:
+        return None
+
+    lines = [
+        "### Practical Scenario Guide",
+        "",
+        (
+            "The steps below are generated only from operations directly verified "
+            "in the retrieved project code."
+        ),
+        "",
+        "**Verified Process:**",
+        "",
+    ]
+    for i, step in enumerate(steps[:8], 1):
+        lines.append(f"{i}. {step}")
+
+    lines.extend([""])
+    if caps.get("success_return_verified"):
+        lines.append(
+            "**Expected Result:** The retrieved executable code explicitly verifies a successful result for this flow."
+        )
+    else:
+        lines.append(
+            "**Expected Result:** The process is verified only up to the last operation shown above; no additional success or persistence behavior is assumed."
+        )
+
+    if not caps.get("frontend_verified"):
+        lines.extend([
+            "",
+            (
+                "**UI Limitation:** No verified frontend evidence was retrieved, so "
+                "screen names, fields, buttons, navigation, and submit actions are not inferred."
+            ),
+        ])
+
+    return "\n".join(lines)
+
+
+def replace_backend_guide_with_verified_capabilities(answer, question, coverage, capabilities):
+    """Replace backend-only Groq guide with deterministic capability-driven steps."""
+    if not answer or "### Practical Scenario Guide" not in answer:
+        return answer
+
+    frontend_verified = bool((coverage or {}).get("frontend"))
+    if frontend_verified:
+        return answer
+
+    guide = build_evidence_driven_backend_guide(question, capabilities)
+    if not guide:
+        return answer
+
+    code_marker = "### Actual Project Code Flow"
+    code_pos = answer.find(code_marker)
+    if code_pos == -1:
+        return answer
+
+    return guide.rstrip() + "\n\n" + answer[code_pos:]
+
+
 def sanitize_unverified_execution_claims(answer, coverage):
     """Remove common execution claims that require evidence layers not retrieved."""
     if not answer:
@@ -6028,6 +6175,7 @@ def ask_shipra_project_ai(question, intent):
         question,
         results,
     )
+    verified_capabilities = build_verified_capabilities(results)
 
     # Accuracy hint: when a handler excerpt is visibly truncated, enrich the context-search
     # wording with deterministic continuation terms. This adds no LLM call.
@@ -6088,6 +6236,7 @@ ACCURACY CONTRACT:
 - Never say an exception is thrown, a record is persisted, a success response is returned, or a later operation completes unless that behavior is visible in the supplied executable excerpt. Comments may be described as comments/intended behavior, not as executed fact.
 - Never invent an HTTP method, endpoint, controller, route, or direct handler invocation when API/controller evidence is absent.
 - If an excerpt ends immediately after constructing data or opening an if/loop/block, describe only the visible construction/check; do not claim what the unseen continuation does.
+- For backend-only workflow guides, executable method calls are stronger evidence than comments. Never promote comments, DTO property names, or truncated continuation into completed behavior.
 - Never turn semantic similarity into a project fact.
 - The entity requested by the user and the operation requested by the user
   must both match the code before you present usage steps.
@@ -6408,6 +6557,12 @@ USER QUESTION:
         answer_text = sanitize_practical_guide(
             answer_text,
             evidence_coverage,
+        )
+        answer_text = replace_backend_guide_with_verified_capabilities(
+            answer_text,
+            question,
+            evidence_coverage,
+            verified_capabilities,
         )
         answer_text = sanitize_unverified_execution_claims(
             answer_text,
