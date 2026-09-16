@@ -5546,6 +5546,91 @@ def build_evidence_coverage(question, results):
     return coverage, note
 
 
+
+def sanitize_practical_guide(answer, coverage):
+    """Remove guide claims that require an unverified frontend/API connection."""
+    if not answer or "### Practical Scenario Guide" not in answer:
+        return answer
+
+    scenario_marker = "### Practical Scenario Guide"
+    code_marker = "### Actual Project Code Flow"
+    start = answer.find(scenario_marker)
+    end = answer.find(code_marker, start)
+    if end == -1:
+        return answer
+
+    frontend_verified = bool((coverage or {}).get("frontend"))
+    api_verified = bool(
+        (coverage or {}).get("api_client")
+        or (coverage or {}).get("controller")
+    )
+    backend_verified = bool(
+        (coverage or {}).get("command_handler")
+        or (coverage or {}).get("repository_domain")
+    )
+
+    guide = answer[start:end]
+    kept = []
+
+    for line in guide.splitlines():
+        stripped = line.strip()
+        low = stripped.lower()
+
+        if re.match(r"^\d+\.", stripped):
+            # No verified frontend => no concrete screen/control workflow claims.
+            if not frontend_verified and re.search(
+                r"\b(open|click|press|select|choose|enter|type|navigate|submit)\b",
+                low,
+            ):
+                continue
+
+            # Frontend file existence does not prove submit/create reaches backend.
+            if not api_verified and (
+                (re.search(r"\b(click|press)\b", low) and re.search(r"\b(submit|create|save)\b", low))
+                or "submit button" in low
+                or "create button" in low
+            ):
+                continue
+
+            # Do not invent confirmation UI from backend creation.
+            if not api_verified and (
+                "success toast" in low
+                or "success notification" in low
+                or ("appears" in low and "list" in low)
+            ):
+                continue
+
+        if low.startswith("**expected result:**") or low.startswith("expected result:"):
+            if not api_verified and (
+                "success toast" in low
+                or "success notification" in low
+                or ("appears" in low and "list" in low)
+            ):
+                if backend_verified:
+                    line = (
+                        "**Expected Result:** The verified backend creation behavior "
+                        "is completed; the exact frontend confirmation is not verified."
+                    )
+                else:
+                    line = (
+                        "**Expected Result:** Only the behavior explicitly verified "
+                        "by the retrieved project evidence can be confirmed."
+                    )
+
+        kept.append(line)
+
+    # Renumber surviving practical steps.
+    n = 0
+    fixed = []
+    for line in kept:
+        if re.match(r"^\s*\d+\.", line):
+            n += 1
+            line = re.sub(r"^(\s*)\d+\.", rf"\g<1>{n}.", line, count=1)
+        fixed.append(line)
+
+    return answer[:start] + "\n".join(fixed).rstrip() + "\n\n" + answer[end:]
+
+
 def ask_shipra_project_ai(question, intent):
     response_language = get_response_language(question)
     code_explanation_heading = (
@@ -5807,6 +5892,8 @@ ACCURACY CONTRACT:
 - Never convert a domain entity/model into a user-facing workflow step.
 - If two verified sources conflict, state the conflict instead of silently choosing one.
 - A file name alone never proves that a screen, route, action, or workflow is reachable.
+- Do not write a Submit/Create/Save button step unless retrieved frontend evidence shows that action and its handler/linkage.
+- Do not claim a success toast, redirect, list refresh, or newly displayed record unless retrieved frontend evidence explicitly shows that outcome.
 - Never turn semantic similarity into a project fact.
 - The entity requested by the user and the operation requested by the user
   must both match the code before you present usage steps.
@@ -6119,6 +6206,14 @@ USER QUESTION:
         answer_text = (
             f"{scenario_marker}\n{scenario_text}\n\n"
             f"{code_marker}\n{code_body.strip()}"
+        )
+
+        # Deterministic accuracy guard: even if the model overclaims a submit
+        # action or frontend success state, remove it when the retrieved layer
+        # coverage does not verify that connection.
+        answer_text = sanitize_practical_guide(
+            answer_text,
+            evidence_coverage,
         )
 
         verified_answer = inject_verified_code(
