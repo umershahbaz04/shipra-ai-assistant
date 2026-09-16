@@ -5710,6 +5710,92 @@ def replace_backend_guide_with_verified_capabilities(answer, question, coverage,
     return guide.rstrip() + "\n\n" + answer[code_pos:]
 
 
+def build_displayed_evidence_capabilities(answer):
+    """Capabilities proven only by executable code actually displayed to the user."""
+    if not answer or "### Actual Project Code Flow" not in answer:
+        return {}
+
+    flow = answer.split("### Actual Project Code Flow", 1)[1]
+
+    # Only fenced code is proof. Explanatory prose cannot prove itself.
+    code_blocks = re.findall(r"```(?:[A-Za-z0-9_+#.-]+)?\s*\n(.*?)```", flow, flags=re.S)
+    executable = "\n".join(code_blocks)
+
+    # Strip comments so comments cannot establish behavior.
+    executable = re.sub(r"/\*.*?\*/", "", executable, flags=re.S)
+    executable = re.sub(r"^\s*///.*?$", "", executable, flags=re.M)
+    executable = re.sub(r"^\s*//.*?$", "", executable, flags=re.M)
+
+    def has(pattern):
+        return bool(re.search(pattern, executable, flags=re.I | re.S))
+
+    return {
+        "sku_lookup_verified": has(r"\bGetProductBySKUAsync\s*\("),
+        "product_create_verified": has(r"\bCreateProductAsync\s*\("),
+        "store_link_verified": has(r"\bCreateStoreProduct\s*\("),
+        "variant_build_verified": has(r"\bGetProductVariants\s*\("),
+        "variant_persist_verified": has(r"\bCreateProductVariantsAsync\s*\("),
+        "inventory_build_verified": has(r"\bGetInventoryBalances\s*\("),
+        "inventory_persist_verified": (
+            has(r"\bGetInventoryBalances\s*\(")
+            and has(r"\b(?:Create|Add|Save|Update|Insert)\w*InventoryBalance\w*(?:Async)?\s*\(")
+        ),
+        "history_create_verified": has(
+            r"\b(?:Create|Add|Save|Insert)\w*(?:StockHistory|InventoryHistory)\w*(?:Async)?\s*\("
+        ),
+        "success_return_verified": (
+            has(
+                r"\b(?:response|serviceResult)\.IsSuccess\s*=\s*true\b|"
+                r"\bServiceResultDTO\s*\([^;]*(?:success|true)"
+            )
+            and has(r"\breturn\s+(?:response|serviceResult)\s*;")
+        ),
+        "http_route_verified": has(
+            r"\[(HttpGet|HttpPost|HttpPut|HttpDelete|Route)\b|"
+            r"\b(MapGet|MapPost|MapPut|MapDelete)\s*\("
+        ),
+    }
+
+
+def enforce_displayed_evidence_boundary(answer, question):
+    """Rebuild backend guide and sanitize prose from evidence visible in the final answer."""
+    if not answer or "### Actual Project Code Flow" not in answer:
+        return answer
+
+    displayed = build_displayed_evidence_capabilities(answer)
+
+    # If no frontend is displayed, rebuild the guide from displayed executable proof.
+    flow = answer.split("### Actual Project Code Flow", 1)[1]
+    displayed_frontend = bool(re.search(
+        r"\*\*File:\*\*\s*`?[^`\n]*Shipra\.Frontend/",
+        flow,
+        flags=re.I,
+    ))
+
+    if not displayed_frontend and "### Practical Scenario Guide" in answer:
+        guide = build_evidence_driven_backend_guide(question, {
+            **displayed,
+            "frontend_verified": False,
+        })
+        if guide:
+            code_pos = answer.find("### Actual Project Code Flow")
+            answer = guide.rstrip() + "\n\n" + answer[code_pos:]
+
+    # Apply explanation guard using displayed capabilities, not hidden retrieval.
+    answer = sanitize_code_flow_explanations(answer, displayed)
+
+    # Catch "implied but not shown" persistence language explicitly.
+    if not displayed.get("inventory_persist_verified"):
+        answer = re.sub(
+            r"(?im)^(\s*(?:[-*]|\d+\.)\s*).*inventory balance.*"
+            r"(?:persist|save).*?(?:implied|not shown|not visible).*?$",
+            r"\1Inventory balances – The displayed code builds inventory-balance records "
+            r"and checks whether entries exist. The persistence operation is not visible "
+            r"in the displayed executable evidence.",
+            answer,
+        )
+
+    return answer
 def sanitize_code_flow_explanations(answer, capabilities):
     """Apply the same verified boundary to code-flow prose."""
     if not answer or "### Actual Project Code Flow" not in answer:
@@ -6324,6 +6410,7 @@ ACCURACY CONTRACT:
 - For backend-only workflow guides, executable method calls are stronger evidence than comments. Never promote comments, DTO property names, or truncated continuation into completed behavior.
 - Apply the same evidence boundary to every `What this code does` section and Evidence Gaps: if persistence/history/success is beyond the visible excerpt, explicitly say it is not visible instead of describing it as completed.
 - Keep evidence source-scoped. Never combine different files/snippets to prove one completed operation. Persistence and success require decisive executable statements in the same relevant handler snippet.
+- Final-answer invariant: a guide or code-flow claim may never be stronger than the executable evidence actually displayed under `Actual Project Code Flow`. Hidden retrieved chunks may help retrieval, but cannot justify a stronger displayed claim unless their supporting code is also included in the displayed evidence.
 - Never turn semantic similarity into a project fact.
 - The entity requested by the user and the operation requested by the user
   must both match the code before you present usage steps.
@@ -6664,6 +6751,10 @@ USER QUESTION:
         verified_answer = sanitize_code_flow_explanations(
             verified_answer,
             verified_capabilities,
+        )
+        verified_answer = enforce_displayed_evidence_boundary(
+            verified_answer,
+            question,
         )
         return clean_assistant_display_text(verified_answer), results
 
