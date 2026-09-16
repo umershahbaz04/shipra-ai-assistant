@@ -17,6 +17,7 @@ import streamlit as st
 from groq import Groq
 from sentence_transformers import SentenceTransformer
 from supabase import create_client, Client as SupabaseClient
+import unicodedata
 
 
 
@@ -2712,29 +2713,74 @@ def get_previous_user_question():
     return ""
 
 
+def _normalize_intent_text(value):
+    """Normalize English, Urdu-script and noisy Roman-Urdu for intent routing."""
+    q = unicodedata.normalize("NFKC", str(value or "")).lower()
+    q = re.sub(r"[_/\\|]+", " ", q)
+    q = re.sub(r"[^\w\s\u0600-\u06ff'-]", " ", q, flags=re.UNICODE)
+    q = re.sub(r"\s+", " ", q).strip()
+    substitutions = (
+        (r"\b(?:mjhy|mujhy|mujhe|muje|mje)\b", " mujhe "),
+        (r"\b(?:meny|maine|mainay|meine)\b", " maine "),
+        (r"\b(?:krna|karna|krny|karne|karny|kru|karoon|karon|kro|karo)\b", " karna "),
+        (r"\b(?:kesy|kaise|kaisay|kese|kis tarah|kis trah|kistarah)\b", " kaise "),
+        (r"\b(?:konsy|konse|konsi|kon si|kon c|kaunse|kaunsi)\b", " kaunse "),
+        (r"\b(?:kam|kaam)\b", " kaam "),
+        (r"\b(?:bnao|banao|banana|banani|banane)\b", " banana "),
+        (r"\b(?:featuer|feautre|feture|feature)\b", " feature "),
+        (r"\b(?:layer|layers|leyer|leyers)\b", " layers "),
+        (r"\b(?:step|steps|stpes)\b", " steps "),
+    )
+    for pattern, repl in substitutions:
+        q = re.sub(pattern, repl, q, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", q).strip()
+
+
 def is_architecture_question(question):
-    """Detect project-structure/development-guidance questions, not end-user workflows."""
-    q = str(question or "").lower()
+    """Route architecture/new-feature DEVELOPMENT guidance, not end-user workflows."""
+    q = _normalize_intent_text(question)
 
-    architecture_phrases = (
-        "which layers", "what layers", "which layer", "what layer",
-        "kon kon c layers", "kon kon si layers", "kon si layers", "konsi layers",
-        "kin layers", "layers mai", "layers mein", "layers me",
-        "project architecture", "application architecture", "architecture",
-        "project structure", "codebase structure", "folder structure",
-        "frontend backend database", "frontend backend",
-        "where to make changes", "where do i make changes",
-        "kahan kahan change", "kahan changes", "kidhar changes",
+    structure_signals = (
+        "architecture", "project structure", "codebase structure", "folder structure",
+        "which layers", "what layers", "kaunse layers", "kin layers",
+        "layers mein", "layers me", "frontend backend", "backend frontend",
+        "where to make changes", "where should i make changes", "where do i make changes",
+        "which files", "what files", "which folders", "what folders",
+        "where in the code", "kahan change", "kahan changes", "kidhar change",
+        "kin files", "kaunse files", "kin folders",
+        "کن لیئر", "کون سی لیئر", "کونسی لیئر", "پروجیکٹ اسٹرکچر",
+        "آرکیٹیکچر", "کن فائل", "کون سی فائل",
     )
-    development_context = (
-        "feature", "new feature", "implement", "develop", "development",
-        "change", "changes", "add", "banana", "banani", "banane",
-        "kam krna", "kaam karna", "work", "shipra", "project",
-    )
+    if any(s in q for s in structure_signals):
+        return True
 
-    has_architecture_signal = any(x in q for x in architecture_phrases)
-    has_development_context = any(x in q for x in development_context)
-    return has_architecture_signal and has_development_context
+    feature_word = ("feature" in q) or ("فیچر" in q)
+    development_word = any(s in q for s in (
+        "add", "adding", "implement", "implementing", "develop", "developing",
+        "development", "create", "creating", "build", "building", "banana",
+        "introduce", "introducing", "extend", "extending", "new feature",
+        "نیا", "نئی", "شامل", "بنانا", "بناؤں", "امپلیمنٹ", "ڈیولپ", "تبدیل",
+    ))
+    has_feature = feature_word and development_word
+
+    guidance_signals = (
+        "how do i", "how can i", "how should i", "how to",
+        "what steps", "which steps", "steps chahiye", "steps lena",
+        "kaise karna", "kaise feature", "kaise add", "kaise implement",
+        "kaunse steps", "kya steps", "process", "guide me", "guide karo",
+        "what do i need", "what needs to change", "what should i change",
+        "which parts", "what parts", "kya karna", "kya changes",
+        "kin jagah", "kahan kahan", "kaam karna par", "kaam karna hoga",
+        "kaam karna pare", "کیسے", "کیا سٹیپس", "کون سے سٹیپس",
+        "کیا کرنا", "کہاں تبدیلی", "کن جگہ", "گائیڈ",
+    )
+    has_guidance = any(s in q for s in guidance_signals)
+    question_form = (
+        "?" in str(question or "")
+        or bool(re.search(r"\b(?:how|what|which|where|kaise|kya|kaunse|kin|kahan)\b", q))
+        or any(x in q for x in ("کیسے", "کیا", "کون", "کہاں"))
+    )
+    return bool(has_feature and (has_guidance or question_form))
 
 
 def detect_request_profile(question):
