@@ -1,5 +1,5 @@
 import os
-SHIPRA_ROUTER_VERSION = "v7-agentic"
+SHIPRA_ROUTER_VERSION = "v10-global-fixed"
 import sys
 import json
 import math
@@ -1560,13 +1560,26 @@ def tokenize(text):
 
 @st.cache_resource(show_spinner="Loading Shipra knowledge base...")
 def load_data():
-    with open("chunks.json", "r", encoding="utf-8") as file:
+    app_dir = Path(__file__).resolve().parent
+    chunks_path = app_dir / "chunks.json"
+    metadata_path = app_dir / "metadata.json"
+    index_path = app_dir / "faiss.index"
+
+    required_files = (chunks_path, metadata_path, index_path)
+    missing_files = [str(path) for path in required_files if not path.is_file()]
+    if missing_files:
+        raise FileNotFoundError(
+            "Shipra knowledge-base files are missing beside the app: "
+            + ", ".join(missing_files)
+        )
+
+    with chunks_path.open("r", encoding="utf-8") as file:
         chunks = json.load(file)
 
-    with open("metadata.json", "r", encoding="utf-8") as file:
+    with metadata_path.open("r", encoding="utf-8") as file:
         metadata = json.load(file)
 
-    index = faiss.read_index("faiss.index")
+    index = faiss.read_index(str(index_path))
     embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
     if len(chunks) != len(metadata):
@@ -4187,7 +4200,7 @@ Do not mix creating a label with assigning a label to orders.
 For existing UI flows, inspect the page/modal and relevant called functions.
 Read additional lines when validation or response handling is cut off.
 Each read may contain at most 120 lines.
-You have at most 12 turns. Prioritize decisive evidence.
+You have at most 18 turns. Prioritize decisive evidence.
 Indexed leads are search hints, not live evidence or guaranteed paths.
 For UI usage questions, prioritize the matching frontend page/modal.
 Read the relevant function, then search its exact API call name.
@@ -4225,6 +4238,15 @@ GLOBAL VERIFICATION RULES:
 - Before concluding that a feature is missing, search exact wording, likely
   camel/pascal-case identifiers, page names, and exact API names derived from
   the question.
+- For create/update/delete/assign/connect/sync workflow questions, expand in
+  both directions before finishing: frontend page/modal -> event handler ->
+  imported API helper/endpoint, and command/query -> handler ->
+  repository/service/persistence. Use find_references/trace_call_chain when a
+  strong symbol is available.
+- A verified frontend file whose path directly names the requested entity is
+  high-priority evidence. Read its relevant handler before claiming no UI exists.
+- If one layer cannot be verified, report only that layer as unverified. Do not
+  discard verified layers or declare the whole feature missing.
 - Do not propose new implementation code while collecting evidence.
 
 Use conversation only to resolve follow-ups; ignore it for a new topic.
@@ -4475,10 +4497,19 @@ Finish when sufficient verified evidence is collected or the exact search is exh
         bootstrap_matches = []
 
         for seed_query in seed_queries:
+            seed_arguments = {"query": seed_query, "max_results": 30}
+            seed_call_key = "search_code" + json.dumps(
+                seed_arguments,
+                sort_keys=True,
+            )
+            if seed_call_key in completed_calls:
+                continue
+            completed_calls.add(seed_call_key)
+
             try:
                 seed_result = await mcp_client.call_tool(
                     "search_code",
-                    {"query": seed_query, "max_results": 30},
+                    seed_arguments,
                 )
 
                 if seed_result.is_error:
@@ -4646,7 +4677,7 @@ Finish when sufficient verified evidence is collected or the exact search is exh
             return prune_mcp_evidence(evidence, question, seed_queries)
 
         planner_failures = 0
-        for _ in range(7):
+        for _ in range(18):
             try:
                 response = await asyncio.to_thread(
                     client.models.generate_content,
@@ -4740,21 +4771,42 @@ Finish when sufficient verified evidence is collected or the exact search is exh
                 "trace_call_chain",
             }
             if tool not in allowed_tools:
-                raise ValueError("Unsupported MCP tool")
+                transcript.append({
+                    "status": "planner_request_rejected",
+                    "message": "Unsupported MCP tool requested by planner.",
+                    "tool": tool,
+                })
+                continue
 
             if not isinstance(arguments, dict):
-                raise ValueError("Invalid MCP tool arguments")
+                transcript.append({
+                    "status": "planner_request_rejected",
+                    "message": "Planner arguments must be a JSON object.",
+                    "tool": tool,
+                })
+                continue
 
             if tool == "search_code":
                 query = str(arguments.get("query", "")).strip()
                 if len(query) < 3:
-                    raise ValueError("MCP search term is too short")
+                    transcript.append({
+                        "status": "planner_request_rejected",
+                        "tool": "search_code",
+                        "message": "MCP search term is too short.",
+                        "query": query,
+                    })
+                    continue
                 arguments = {"query": query, "max_results": 30}
 
             elif tool == "find_mock_order":
                 order_no = str(arguments.get("order_no", "")).strip()
                 if not order_no:
-                    raise ValueError("Mock order number is required")
+                    transcript.append({
+                        "status": "planner_request_rejected",
+                        "tool": "find_mock_order",
+                        "message": "Mock order number is required.",
+                    })
+                    continue
                 arguments = {"order_no": order_no}
 
             elif tool == "search_mock_orders":
@@ -4798,19 +4850,34 @@ Finish when sufficient verified evidence is collected or the exact search is exh
             elif tool == "find_symbol":
                 symbol_name = str(arguments.get("symbol_name", "")).strip()
                 if not symbol_name:
-                    raise ValueError("Symbol name is required")
+                    transcript.append({
+                        "status": "planner_request_rejected",
+                        "tool": "find_symbol",
+                        "message": "Symbol name is required.",
+                    })
+                    continue
                 arguments = {"symbol_name": symbol_name}
 
             elif tool == "find_references":
                 symbol_name = str(arguments.get("symbol_name", "")).strip()
                 if not symbol_name:
-                    raise ValueError("Symbol name is required")
+                    transcript.append({
+                        "status": "planner_request_rejected",
+                        "tool": "find_references",
+                        "message": "Symbol name is required.",
+                    })
+                    continue
                 arguments = {"symbol_name": symbol_name}
 
             elif tool == "trace_call_chain":
                 entry_symbol = str(arguments.get("entry_symbol", "")).strip()
                 if not entry_symbol:
-                    raise ValueError("Entry symbol is required")
+                    transcript.append({
+                        "status": "planner_request_rejected",
+                        "tool": "trace_call_chain",
+                        "message": "Entry symbol is required.",
+                    })
+                    continue
                 arguments = {"entry_symbol": entry_symbol}
 
             elif tool == "read_file":
@@ -4842,8 +4909,17 @@ Finish when sufficient verified evidence is collected or the exact search is exh
                     })
                     continue
 
-                start_line = max(1, int(arguments.get("start_line", 1)))
-                end_line = int(arguments.get("end_line", start_line + 119))
+                try:
+                    start_line = max(1, int(arguments.get("start_line", 1)))
+                    end_line = int(arguments.get("end_line", start_line + 119))
+                except (TypeError, ValueError):
+                    transcript.append({
+                        "status": "planner_request_rejected",
+                        "tool": "read_file",
+                        "message": "start_line/end_line must be integers.",
+                    })
+                    continue
+
                 arguments = {
                     "file_path": path,
                     "start_line": start_line,
