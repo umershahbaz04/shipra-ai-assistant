@@ -8,7 +8,13 @@ from mcp.server.mcpserver import MCPServer
 
 
 APP_ROOT = Path(__file__).resolve().parent
-SOURCE_EXTENSIONS = {".cs", ".js", ".jsx", ".ts", ".tsx"}
+# Include code *and* the small project files that establish routes, views,
+# configuration and API contracts.  Excluding .cshtml/.csproj/.json made a
+# number of otherwise exact questions impossible to verify from raw source.
+SOURCE_EXTENSIONS = {
+    ".cs", ".cshtml", ".razor", ".js", ".jsx", ".ts", ".tsx",
+    ".py", ".json", ".yml", ".yaml", ".csproj", ".sln",
+}
 EXCLUDED_DIRECTORIES = {
     ".git",
     ".venv",
@@ -170,6 +176,22 @@ def _read_source_text(path: Path) -> str | None:
         return None
 
 
+def _query_terms(query: str) -> list[str]:
+    """Return useful words for a tolerant multi-word code search."""
+    ignored = {
+        "a", "an", "and", "are", "can", "do", "does", "for", "from",
+        "how", "i", "in", "is", "it", "of", "on", "or", "the", "this",
+        "to", "what", "when", "where", "which", "with", "you", "your",
+        "batao", "btao", "hai", "hain", "hy", "ka", "kare", "karna",
+        "ke", "kesy", "ki", "ko", "mai", "main", "mein", "mjhy", "se", "sy",
+    }
+    return [
+        word.casefold()
+        for word in re.findall(r"[A-Za-z0-9_]+", query)
+        if len(word) >= 3 and word.casefold() not in ignored
+    ][:8]
+
+
 def _source_diagnostic() -> dict:
     sample_files: list[str] = []
     total_source_files = 0
@@ -212,10 +234,18 @@ def _source_diagnostic() -> dict:
 
 
 def _search_literal(query: str, max_results: int) -> tuple[list[dict], int, int]:
+    """Rank exact and multi-word matches instead of requiring one literal phrase.
+
+    Project questions are commonly written as natural language or Roman Urdu,
+    while source identifiers are camelCase/PascalCase.  A strict substring
+    search returns nothing for e.g. "sale channel activate" even when the
+    relevant file contains `saleChannel` and `handleActivate`.
+    """
     matches: list[dict] = []
     skipped_files = 0
     searchable_files = 0
     search_text = query.casefold()
+    terms = _query_terms(query)
 
     for path in _iter_source_files() or []:
         searchable_files += 1
@@ -224,35 +254,37 @@ def _search_literal(query: str, max_results: int) -> tuple[list[dict], int, int]
             skipped_files += 1
             continue
 
-        # Filename/path matches matter for feature pages such as returnOrders/index.js
-        # even when the literal feature phrase is not repeated in the file body.
-        if search_text in relative.casefold():
-            matches.append({
-                "file_path": relative,
-                "line_number": 1,
-                "match_kind": "path",
-                "line_text": "",
-            })
-            if len(matches) >= max_results:
-                return matches, skipped_files, searchable_files
-
         text = _read_source_text(path)
         if text is None:
             skipped_files += 1
             continue
 
+        path_text = relative.casefold()
         for line_number, line in enumerate(text.splitlines(), start=1):
-            if search_text in line.casefold():
-                matches.append({
-                    "file_path": relative,
-                    "line_number": line_number,
-                    "match_kind": "content",
-                    "line_text": line.strip()[:500],
-                })
-                if len(matches) >= max_results:
-                    return matches, skipped_files, searchable_files
+            line_text = line.casefold()
+            haystack = f"{path_text}\n{line_text}"
+            exact = bool(search_text and search_text in haystack)
+            term_hits = sum(term in haystack for term in terms)
+            # A one-word query remains literal.  For a phrase, accept a line
+            # only when at least two distinctive words match.
+            if not exact and (len(terms) < 2 or term_hits < 2):
+                continue
+            score = (1000 if exact else 0) + term_hits * 100
+            if all(term in path_text for term in terms):
+                score += 300
+            matches.append({
+                "file_path": relative,
+                "line_number": line_number,
+                "match_kind": "exact" if exact else "term_match",
+                "term_hits": term_hits,
+                "score": score,
+                "line_text": line.strip()[:500],
+            })
 
-    return matches, skipped_files, searchable_files
+    matches.sort(
+        key=lambda item: (-item["score"], item["file_path"], item["line_number"])
+    )
+    return matches[:max_results], skipped_files, searchable_files
 
 
 def _find_orders_file() -> Path | None:
@@ -326,7 +358,7 @@ def get_project_structure() -> dict:
 
 @mcp.tool()
 def search_code(query: str, max_results: int = 20) -> dict:
-    """Search both source paths and literal source text."""
+    """Search source paths/text with exact-first, multi-word ranking."""
     query = str(query or "").strip()
 
     if len(query) < 3:
