@@ -4091,6 +4091,19 @@ Finish when sufficient verified evidence is collected or the exact search is exh
         # This prevents semantically similar but unrelated files from becoming the
         # only evidence when the question names a concrete operation.
         seed_queries = get_mcp_seed_queries(question, search_results)
+
+        # FAST + ACCURATE LOCATION MODE
+        if is_codebase_location_question(question):
+            location_queries = get_codebase_lookup_queries(question)
+            ordered = []
+            seen_queries = set()
+            for q in location_queries + seed_queries:
+                q = str(q or "").strip()
+                if q and q.lower() not in seen_queries:
+                    seen_queries.add(q.lower())
+                    ordered.append(q)
+            seed_queries = ordered[:4]
+
         bootstrap_matches = []
 
         for seed_query in seed_queries:
@@ -4170,8 +4183,9 @@ Finish when sufficient verified evidence is collected or the exact search is exh
         )
         bootstrap_paths_read = set()
 
+        bootstrap_read_limit = 4 if is_codebase_location_question(question) else 8
         for match in ranked_bootstrap:
-            if len(bootstrap_paths_read) >= 8:
+            if len(bootstrap_paths_read) >= bootstrap_read_limit:
                 break
 
             path = match["file_path"]
@@ -4259,8 +4273,12 @@ Finish when sufficient verified evidence is collected or the exact search is exh
                     "error": f"{type(read_error).__name__}: {read_error}",
                 })
 
+        # Verified location evidence is sufficient; skip expensive planner turns.
+        if is_codebase_location_question(question) and evidence:
+            return prune_mcp_evidence(evidence, question, seed_queries)
+
         planner_failures = 0
-        for _ in range(12):
+        for _ in range(7):
             try:
                 response = await asyncio.to_thread(
                     client.models.generate_content,
@@ -6524,6 +6542,16 @@ def build_codebase_location_answer(question, results):
     )
     return "\n".join(lines).strip()
 
+def _location_cache_key(question):
+    return _normalize_intent_text(question)
+
+
+def _get_location_answer_cache():
+    if "_shipra_location_answer_cache" not in st.session_state:
+        st.session_state["_shipra_location_answer_cache"] = {}
+    return st.session_state["_shipra_location_answer_cache"]
+
+
 def ask_shipra_project_ai(question, intent):
     # ARCHITECTURE FAST PATH:
     # These are project-structure guidance questions, not end-user workflows.
@@ -6531,6 +6559,12 @@ def ask_shipra_project_ai(question, intent):
     architecture_answer = build_architecture_guidance_answer(question)
     if architecture_answer is not None:
         return clean_assistant_display_text(architecture_answer), []
+
+    # Repeated verified location lookup: instant session-cache response.
+    if is_codebase_location_question(question):
+        cached = _get_location_answer_cache().get(_location_cache_key(question))
+        if cached:
+            return cached["answer"], cached["results"]
 
     response_language = get_response_language(question)
     code_explanation_heading = (
@@ -6731,9 +6765,17 @@ def ask_shipra_project_ai(question, intent):
     # Retrieval has already been verified by MCP. Location questions must never
     # fall through to Practical Scenario Guide / workflow formatting.
     if is_codebase_location_question(question):
-        return clean_assistant_display_text(
+        location_answer = clean_assistant_display_text(
             build_codebase_location_answer(question, results)
-        ), results
+        )
+        cache = _get_location_answer_cache()
+        cache[_location_cache_key(question)] = {
+            "answer": location_answer,
+            "results": results,
+        }
+        while len(cache) > 30:
+            cache.pop(next(iter(cache)))
+        return location_answer, results
 
     mock_answer = answer_from_mock_data(
         question,
@@ -6764,7 +6806,7 @@ def ask_shipra_project_ai(question, intent):
 
     # SPEED: keep full verified MCP results for code injection/fallback, but limit
     # only the text sent to Groq. This reduces prompt/token processing latency.
-    MAX_GROQ_CONTEXT_CHARS = 24000
+    MAX_GROQ_CONTEXT_CHARS = 16000
     if len(context) > MAX_GROQ_CONTEXT_CHARS:
         context = context[:MAX_GROQ_CONTEXT_CHARS]
         print(
