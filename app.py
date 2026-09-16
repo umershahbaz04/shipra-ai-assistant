@@ -5558,17 +5558,9 @@ def ask_shipra_project_ai(question, intent):
         )
     )
 
-    if not is_mock_record_lookup:
-        try:
-            source_health = asyncio.run(get_mcp_source_health())
-        except Exception:
-            source_health = {}
-
-        if source_health and not bool(source_health.get("raw_source_ready")):
-            return build_source_unavailable_answer(
-                question,
-                source_health,
-            ), []
+    # FAST PATH:
+    # Do not launch a separate MCP process only to health-check the source tree.
+    # The real evidence call below is authoritative and avoids one full MCP round-trip.
 
 
     # ------------------------------------------------------------------
@@ -5600,7 +5592,7 @@ def ask_shipra_project_ai(question, intent):
         # suggest candidate identifiers/paths, then ask MCP to verify them.
         rag_candidates = search_documentation(
             search_question,
-            top_k=15,
+            top_k=8,
         )
         rag_candidates = filter_relevant_results(
             rag_candidates,
@@ -6418,95 +6410,14 @@ for conversation in list_conversations():
 
 
 def render_message_copy_button(content, key, align="left"):
-    """Small ChatGPT-style copy action directly below the message."""
-    import json as _json
-
+    """Native Streamlit copy UI; avoids custom iframe components."""
     text_value = str(content or "")
-    safe_text = _json.dumps(text_value)
-    safe_key = re.sub(r"[^a-zA-Z0-9_-]", "_", str(key))
-    justify = "flex-end" if align == "right" else "flex-start"
-
-    st.components.v1.html(
-        f"""
-        <div style="
-            display:flex;
-            justify-content:{justify};
-            align-items:center;
-            height:22px;
-            margin-top:-3px;
-            margin-bottom:5px;
-            padding:0;
-            background:transparent;
-        ">
-            <button
-                id="copy_{safe_key}"
-                title="Copy"
-                aria-label="Copy"
-                onclick='copyMessage_{safe_key}()'
-                style="
-                    display:inline-flex;
-                    align-items:center;
-                    justify-content:center;
-                    width:26px;
-                    height:22px;
-                    padding:0;
-                    margin:0;
-                    border:0;
-                    border-radius:5px;
-                    background:transparent;
-                    color:#9b9b9b;
-                    cursor:pointer;
-                "
-                onmouseover="this.style.background='rgba(255,255,255,0.07)';this.style.color='#d7d7d7';"
-                onmouseout="this.style.background='transparent';this.style.color='#9b9b9b';"
-            >
-                <svg width="16" height="16" viewBox="0 0 24 24"
-                     fill="none" stroke="currentColor" stroke-width="1.8"
-                     stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="9" y="9" width="11" height="11" rx="1.5"></rect>
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                </svg>
-            </button>
-        </div>
-
-        <script>
-        function copyMessage_{safe_key}() {{
-            const value = {safe_text};
-            const button = document.getElementById("copy_{safe_key}");
-
-            function showDone() {{
-                const old = button.innerHTML;
-                button.innerHTML =
-                    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" ' +
-                    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
-                    'stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
-                button.title = "Copied";
-                setTimeout(() => {{
-                    button.innerHTML = old;
-                    button.title = "Copy";
-                }}, 1200);
-            }}
-
-            if (navigator.clipboard && window.isSecureContext) {{
-                navigator.clipboard.writeText(value).then(showDone);
-            }} else {{
-                const area = document.createElement("textarea");
-                area.value = value;
-                area.style.position = "fixed";
-                area.style.opacity = "0";
-                document.body.appendChild(area);
-                area.focus();
-                area.select();
-                document.execCommand("copy");
-                document.body.removeChild(area);
-                showDone();
-            }}
-        }}
-        </script>
-        """,
-        height=24,
-        scrolling=False,
-    )
+    if hasattr(st, "popover"):
+        with st.popover("⧉", help="Copy message"):
+            st.code(text_value, language=None)
+    else:
+        with st.expander("⧉ Copy"):
+            st.code(text_value, language=None)
 
 
 # Render the selected conversation above the sticky composer.
@@ -6584,15 +6495,28 @@ if question:
         "assistant",
         avatar=":material/auto_awesome:",
     ):
-        with st.spinner("AI is preparing your answer..."):
-            try:
-                answer, sources = ask_shipra_ai(question)
-            except Exception as error:
-                # Keep the failed user turn, but do not persist a fake AI answer.
-                st.error(
-                    f"AI request failed: {type(error).__name__}: {error}"
-                )
-                st.stop()
+        status_box = st.status(
+            "Checking Shipra...",
+            expanded=False,
+        )
+        try:
+            answer, sources = ask_shipra_ai(question)
+            status_box.update(
+                label="Done",
+                state="complete",
+                expanded=False,
+            )
+        except Exception as error:
+            status_box.update(
+                label="Request failed",
+                state="error",
+                expanded=False,
+            )
+            # Keep the failed user turn, but do not persist a fake AI answer.
+            st.error(
+                f"AI request failed: {type(error).__name__}: {error}"
+            )
+            st.stop()
 
         answer = clean_assistant_display_text(answer)
         st.markdown(answer)
