@@ -1,5 +1,5 @@
 import os
-SHIPRA_ROUTER_VERSION = "v10-global-fixed"
+SHIPRA_ROUTER_VERSION = "v11-universal-workflow-fixed"
 import sys
 import json
 import math
@@ -3815,7 +3815,14 @@ def get_mcp_seed_queries(question, search_results):
         if entity_words:
             variants = [entity_words]
             singular = list(entity_words)
-            if singular[-1].lower().endswith("s") and len(singular[-1]) > 3:
+            last = singular[-1].lower()
+            if last.endswith("ies") and len(last) > 4:
+                singular[-1] = singular[-1][:-3] + "y"
+                variants.append(singular)
+            elif last.endswith("ses") and len(last) > 4:
+                singular[-1] = singular[-1][:-2]
+                variants.append(singular)
+            elif last.endswith("s") and not last.endswith("ss") and len(last) > 3:
                 singular[-1] = singular[-1][:-1]
                 variants.append(singular)
 
@@ -3827,10 +3834,17 @@ def get_mcp_seed_queries(question, search_results):
                 add(
                     entity_pascal,
                     prefix + entity_pascal,
+                    "Add" + entity_pascal,
+                    "Save" + entity_pascal,
+                    "Post" + entity_pascal,
                     entity_pascal + "Modal",
                     prefix + entity_pascal + "Modal",
+                    "Add" + entity_pascal + "Modal",
                     entity_pascal + "Form",
                     entity_pascal + "Page",
+                    entity_pascal + "Repository",
+                    prefix + entity_pascal + "Command",
+                    prefix + entity_pascal + "CommandHandler",
                 )
 
     # Reuse exact code identifiers already surfaced by indexed retrieval as
@@ -4079,6 +4093,35 @@ def get_request_semantic_contract(question):
     }
 
 
+def get_concept_variants(concept):
+    """Return conservative lexical/code-name variants for one business concept."""
+    raw = str(concept or "").strip().lower()
+    if not raw:
+        return set()
+
+    variants = {raw}
+
+    # Common English plural normalization used in feature names:
+    # sales -> sale, inventories -> inventory, categories -> category, orders -> order.
+    if raw.endswith("ies") and len(raw) > 4:
+        variants.add(raw[:-3] + "y")
+    elif raw.endswith("ses") and len(raw) > 4:
+        variants.add(raw[:-2])
+    elif raw.endswith("s") and not raw.endswith("ss") and len(raw) > 3:
+        variants.add(raw[:-1])
+
+    # Preserve compact code-identifier matching.
+    return {v for v in variants if v}
+
+
+def concept_matches_searchable(concept, searchable, tokens):
+    variants = get_concept_variants(concept)
+    return any(
+        variant in tokens or variant in searchable
+        for variant in variants
+    )
+
+
 def evidence_matches_request(item, question):
     if item.get("source_type") == "mock_data":
         return True
@@ -4105,10 +4148,18 @@ def evidence_matches_request(item, question):
     concepts=contract["concepts"]; action=contract["action"]; searchable=path+"\n"+str(item.get("symbol") or "").lower()+"\n"+body
     tokens=tokenize(searchable)
     if concepts:
-        matched={c for c in concepts if c in tokens or c in searchable}
-        required=1 if len(concepts)==1 else max(2,len(set(concepts))-1)
-        if len(matched)<required: return False
-        if re.search(r"\borders?\b",str(question or "").lower()) and "order" not in searchable: return False
+        matched = {
+            c for c in concepts
+            if concept_matches_searchable(c, searchable, tokens)
+        }
+        required = 1 if len(concepts) == 1 else max(2, len(set(concepts)) - 1)
+        if len(matched) < required:
+            return False
+        if (
+            re.search(r"\borders?\b", str(question or "").lower())
+            and not concept_matches_searchable("order", searchable, tokens)
+        ):
+            return False
     markers={"create":("create","add","generate","save","submit","post"),"update":("update","edit","modify","patch","put"),"delete":("delete","remove"),"assign":("assign","apply","allocate"),"connect":("connect","connection","activate","link"),"sync":("sync","synchron"),"export":("export","csv","excel","download"),"import":("import","upload"),"filter":("filter","search"),"track":("track","tracking"),"validate":("validat",)}
     if action in markers:
         has_action=any(m in searchable for m in markers[action])
@@ -4235,6 +4286,13 @@ GLOBAL VERIFICATION RULES:
 - Preserve actual execution order from the code.
 - If only part of the requested workflow can be verified, collect that part and
   finish. Do not fill missing layers with related-looking files.
+- Read/query/export handlers for an entity do NOT prove that create/update/delete
+  operations are absent. For a requested mutation, explicitly search mutation
+  identifiers (for example Create<Entity>, Add<Entity>, Save<Entity>, Post<Entity>,
+  matching frontend handlers/API helpers, and repository methods) before finishing.
+- Never state "feature does not exist", "no existing feature", or equivalent from
+  incomplete retrieval. State only which requested operation could not be verified
+  from the searched evidence, while preserving any layers that were verified.
 - Before concluding that a feature is missing, search exact wording, likely
   camel/pascal-case identifiers, page names, and exact API names derived from
   the question.
@@ -4243,6 +4301,9 @@ GLOBAL VERIFICATION RULES:
   imported API helper/endpoint, and command/query -> handler ->
   repository/service/persistence. Use find_references/trace_call_chain when a
   strong symbol is available.
+- Compound entity names must tolerate ordinary plural wording when matching
+  code identifiers (for example "inventory sales" may map to InventorySale), while
+  still requiring the requested operation to match.
 - A verified frontend file whose path directly names the requested entity is
   high-priority evidence. Read its relevant handler before claiming no UI exists.
 - If one layer cannot be verified, report only that layer as unverified. Do not
@@ -5601,26 +5662,28 @@ def build_verified_evidence_gap_answer(question):
     if response_language == "Roman Urdu":
         return (
             "### Practical Scenario Guide\n"
-            "Requested Shipra feature ka exact verified usage flow available "
-            "source code se confirm nahi ho saka. Main related-looking files ko "
-            "actual workflow ka hissa assume nahi kar raha.\n\n"
+            "Requested Shipra operation ka exact end-to-end flow searched project "
+            "evidence se verify nahi ho saka. Is ka matlab yeh nahi ke feature "
+            "project mein exist nahi karta; sirf requested operation ki complete "
+            "connected evidence verify nahi hui.\n\n"
             "### Actual Project Code Flow\n"
-            "MCP exact-code verification requested entity aur operation ke liye "
-            "sufficient connected evidence collect nahi kar saki. Is liye "
-            "unsupported screen steps, API calls, controllers, handlers, ya "
-            "database behavior invent nahi kiya gaya."
+            "Jo layers MCP se verify hui hain unhein evidence ke sath dikhaya jayega. "
+            "Jo specific layer ya operation verify nahi hui, sirf usi ko unverified "
+            "mark kiya jayega; related query/export/read code ko create/update/delete "
+            "operation ka proof ya absence proof assume nahi kiya jayega."
         )
 
     return (
         "### Practical Scenario Guide\n"
-        "The exact usage flow for the requested Shipra feature could not be "
-        "verified from the available source code. Related-looking files are not "
-        "being treated as part of the workflow without a proven connection.\n\n"
+        "The requested Shipra operation could not be verified end-to-end from the "
+        "searched project evidence. This does not establish that the feature is "
+        "absent; it only means complete connected evidence for the requested "
+        "operation was not verified.\n\n"
         "### Actual Project Code Flow\n"
-        "MCP exact-code verification did not collect sufficient connected "
-        "evidence for the requested entity and operation. Unsupported screen "
-        "steps, API calls, controllers, handlers, or database behavior are "
-        "therefore not being invented."
+        "Verified layers should still be shown with their evidence. Only the "
+        "specific unverified layer or operation should be marked unverified; "
+        "related query/export/read code must not be treated as proof of a mutation "
+        "or as proof that the mutation does not exist."
     )
 
 
@@ -6070,18 +6133,40 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
 
     # ---- Inventory ----
     elif "inventory" in q:
-        if has("inventorysale", "product inventory"):
+        inventory_sales_question = bool(
+            re.search(r"\binventory\s+sales?\b|\bsales?\s+inventory\b", q)
+        )
+
+        if inventory_sales_question:
+            if has("inventorysale") and has("shipra.frontend", "/pages/"):
+                steps.append("Open the verified Shipra frontend area for **Inventory Sales**.")
+            if has("createinventorysale", "addinventorysale", "saveinventorysale", "postinventorysale"):
+                steps.append("Use the verified Inventory Sales creation action shown in the source evidence.")
+            if has("inventorysale") and not has(
+                "createinventorysale", "addinventorysale", "saveinventorysale", "postinventorysale"
+            ):
+                steps.append(
+                    "Inventory Sales-related code was verified, but the displayed evidence does not "
+                    "verify the requested create action; no create steps are inferred from query/export code."
+                )
+            expected = (
+                "Only the Inventory Sales creation behavior directly verified by the retrieved "
+                "frontend/backend evidence is confirmed."
+            )
+        elif has("inventorysale", "product inventory"):
             steps.append("Open the relevant **Product Inventory** screen in Shipra.")
-        if has("editinventorymodal", "updateproductstockquantitybyreason"):
+
+        if not inventory_sales_question and has("editinventorymodal", "updateproductstockquantitybyreason"):
             steps.append("Select the inventory item whose stock quantity you want to update and open the inventory edit action.")
             if has('name: "reason"', "transactiontypeid"):
                 steps.append("Select the applicable stock adjustment reason.")
             if has('name: "quantity"', "quantity: parsefloat"):
                 steps.append("Enter the quantity to adjust and add a comment if required.")
             steps.append("Submit the stock update and verify the refreshed inventory quantity.")
-        if has("syncinventorymodal", "salechannelinventorysync"):
+        if not inventory_sales_question and has("syncinventorymodal", "salechannelinventorysync"):
             steps.append("If inventory synchronization is required, choose the sale channel/configuration and run the inventory sync.")
-        expected = "The selected inventory operation is completed and the inventory view is refreshed with the verified result."
+        if not inventory_sales_question:
+            expected = "The selected inventory operation is completed and the inventory view is refreshed with the verified result."
 
     # Generic evidence-based fallback: do NOT pretend generic actions are exact.
     if not steps:
