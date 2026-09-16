@@ -2898,6 +2898,39 @@ def get_codebase_lookup_queries(question):
     return queries[:8]
 
 
+
+def normalize_business_status_semantically(question):
+    """
+    Normalize natural business-status paraphrases without requiring one exact wording.
+    Returns only canonical status labels used for routing; never returns business data.
+    """
+    q = _normalize_intent_text(question)
+
+    semantic_statuses = {
+        "delivered": (
+            "delivered", "deliver ho", "customer ko pohanch", "customer tak pohanch",
+            "customer ko mil", "customer tak mil", "receive ho", "received by customer",
+            "reached customer", "reached the customer", "successfully delivered",
+            "pohanchne wale", "pohanch gaye", "pohanch gay", "pohanch chuk",
+            "mil chuke", "mil gay", "mil gaye", "موصول", "پہنچ", "ڈیلیور",
+        ),
+        "pending": (
+            "pending", "baqi", "remaining", "not completed", "not delivered yet",
+            "abhi tak nahi", "reh gaye", "reh gay", "باقی", "پینڈنگ",
+        ),
+        "cancelled": ("cancelled", "canceled", "cancel ho", "منسوخ", "کینسل"),
+        "returned": ("returned", "return ho", "wapas", "واپس", "ریٹرن"),
+        "shipped": ("shipped", "dispatch", "dispatched", "bhej diye", "bhej dia", "روانہ"),
+        "processing": ("processing", "in process", "process me", "process mein"),
+        "completed": ("completed", "complete ho", "mukammal", "مکمل"),
+        "paid": ("paid", "payment received", "paisa mil", "ادا"),
+        "unpaid": ("unpaid", "payment pending", "paisa nahi", "بقایا"),
+    }
+    for status, phrases in semantic_statuses.items():
+        if any(p in q for p in phrases):
+            return status
+    return None
+
 def is_data_aggregate_question(question):
     """
     Universal detector for factual aggregate questions over Shipra business data.
@@ -2936,10 +2969,16 @@ def is_data_aggregate_question(question):
 
     has_count = any(s in q for s in count_signals)
     has_entity = any(s in padded for s in business_entities)
-    has_status = any(s in q for s in status_signals)
+    semantic_status = normalize_business_status_semantically(raw)
+    has_status = any(s in q for s in status_signals) or bool(semantic_status)
 
     # Explicit count + business entity is sufficient; status is optional.
-    if has_count and has_entity:
+    # Also catch natural interrogative morphology such as "orders kitne hain?"
+    roman_count = bool(re.search(r"\b(?:kitn\w*|ktn\w*)\b", q))
+    english_count = bool(re.search(r"\b(?:how many|count|total|number of)\b", q))
+    urdu_count = any(x in q for x in ("کتنے", "کتنی", "تعداد", "کل"))
+
+    if (has_count or roman_count or english_count or urdu_count) and has_entity:
         return True
 
     # Natural shorthand: "delivered orders?" / "pending kitny?".
@@ -2982,7 +3021,9 @@ def get_data_query_contract(question):
         "inactive": ("inactive",),
     }
     entity = next((name for name, aliases in entity_aliases.items() if any(a in q for a in aliases)), None)
-    status = next((name for name, aliases in status_aliases.items() if any(a in q for a in aliases)), None)
+    status = normalize_business_status_semantically(question)
+    if not status:
+        status = next((name for name, aliases in status_aliases.items() if any(a in q for a in aliases)), None)
     return {"entity": entity, "status": status, "operation": "count"}
 
 
@@ -3065,6 +3106,7 @@ Return JSON ONLY:
 Rules:
 - Asking where code/config/class/function/service is located => codebase_location.
 - Asking count/total/how many of business records, optionally by status => data_query.
+- Understand outcome paraphrases semantically: e.g. "customer ko pohanchne wale orders" means delivered orders; do not require the literal word delivered.
 - Asking which layers/files/steps are needed to add/build a feature => architecture_guidance.
 - Asking how an existing Shipra feature/process works or is performed => project_workflow.
 - Asking why/what a specific code/file/function does => code_explanation.
