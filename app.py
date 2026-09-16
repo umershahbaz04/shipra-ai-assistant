@@ -5547,6 +5547,62 @@ def build_evidence_coverage(question, results):
 
 
 
+def sanitize_unverified_execution_claims(answer, coverage):
+    """Remove common execution claims that require evidence layers not retrieved."""
+    if not answer:
+        return answer
+
+    api_verified = bool(
+        (coverage or {}).get("api_client")
+        or (coverage or {}).get("controller")
+    )
+
+    lines = []
+    for line in answer.splitlines():
+        low = line.lower()
+
+        # No API/controller evidence => never invent transport or invocation details.
+        if not api_verified and (
+            re.search(r"\bpost request\b", low)
+            or re.search(r"\bget request\b", low)
+            or re.search(r"\bput request\b", low)
+            or re.search(r"\bdelete request\b", low)
+            or "api endpoint" in low
+            or "http endpoint" in low
+            or "calling the handler directly" in low
+        ):
+            continue
+
+        # Qualify claims that explicitly admit the executable proof is outside excerpt.
+        if "not shown in the excerpt" in low and (
+            "throw" in low or "fails" in low or "failure" in low
+        ):
+            line = re.sub(
+                r"(?i)if .*?(?:,|;)\s*(?:the )?operation (?:fails|would fail).*",
+                "The supplied comment indicates duplicate-SKU rejection is intended, "
+                "but the executable rejection branch is not visible in this excerpt.",
+                line,
+            )
+
+        # If persistence/success is explicitly said to occur beyond the excerpt,
+        # reduce it to the operation that is actually visible.
+        if "code continues beyond the excerpt" in low:
+            line = re.sub(
+                r"(?i)\s+and persists them\s*\(code continues beyond the excerpt\)",
+                " (persistence is not visible in this excerpt)",
+                line,
+            )
+            line = re.sub(
+                r"(?i)\s+and (?:then )?persists them.*",
+                " (persistence is not visible in this excerpt)",
+                line,
+            )
+
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
 def sanitize_practical_guide(answer, coverage):
     """Keep the guide useful while preventing unsupported UI or outcome claims."""
     if not answer or "### Practical Scenario Guide" not in answer:
@@ -5724,6 +5780,40 @@ def sanitize_practical_guide(answer, coverage):
         fixed.append(line)
 
     return answer[:start] + "\n".join(fixed).rstrip() + "\n\n" + answer[end:]
+
+def get_accuracy_continuation_queries(question, results):
+    """Build cheap MCP follow-up queries when evidence is backend-only or visibly truncated."""
+    paths = [
+        str(item.get("file_path") or item.get("path") or "")
+        for item in (results or [])
+    ]
+    snippets = "\n".join(
+        str(item.get("content") or item.get("snippet") or item.get("text") or "")
+        for item in (results or [])
+    )
+
+    queries = []
+    backend_paths = [p for p in paths if "CommandHandler" in p or "Handler" in p]
+
+    # A handler ending around an open conditional is a strong signal that the
+    # decisive persistence/success branch may be just beyond the returned chunk.
+    tail = snippets[-1800:]
+    truncated_signal = (
+        tail.count("{") > tail.count("}")
+        or bool(re.search(r"\bif\s*\([^)]*\)\s*\{\s*$", tail, re.S))
+    )
+
+    if backend_paths and truncated_signal:
+        feature = extract_feature_terms(question)
+        base = " ".join(feature[:5]) if feature else question
+        queries.extend([
+            f"{base} handler continuation persistence success exception",
+            f"{base} repository create inventory balance history options",
+        ])
+
+    # Keep it bounded: at most two deterministic MCP follow-ups.
+    return list(dict.fromkeys(q for q in queries if q.strip()))[:2]
+
 
 def ask_shipra_project_ai(question, intent):
     response_language = get_response_language(question)
@@ -5939,6 +6029,12 @@ def ask_shipra_project_ai(question, intent):
         results,
     )
 
+    # Accuracy hint: when a handler excerpt is visibly truncated, enrich the context-search
+    # wording with deterministic continuation terms. This adds no LLM call.
+    continuation_queries = get_accuracy_continuation_queries(question, results)
+    if continuation_queries:
+        search_question = search_question + " " + " ".join(continuation_queries)
+
     context = build_context(results, search_question)
 
     # SPEED: keep full verified MCP results for code injection/fallback, but limit
@@ -5990,6 +6086,8 @@ ACCURACY CONTRACT:
 - Do not claim a success toast, redirect, list refresh, or newly displayed record unless retrieved frontend evidence explicitly shows that outcome.
 - If frontend evidence is absent for a workflow question, do not invent UI navigation or controls. Instead create 4-8 short numbered Verified Process steps directly from the retrieved backend evidence, in execution order where the code establishes one. Request properties may be described as required/provided data, but never as named UI fields unless frontend evidence verifies them. Explicitly state the UI evidence gap.
 - Never say an exception is thrown, a record is persisted, a success response is returned, or a later operation completes unless that behavior is visible in the supplied executable excerpt. Comments may be described as comments/intended behavior, not as executed fact.
+- Never invent an HTTP method, endpoint, controller, route, or direct handler invocation when API/controller evidence is absent.
+- If an excerpt ends immediately after constructing data or opening an if/loop/block, describe only the visible construction/check; do not claim what the unseen continuation does.
 - Never turn semantic similarity into a project fact.
 - The entity requested by the user and the operation requested by the user
   must both match the code before you present usage steps.
@@ -6308,6 +6406,10 @@ USER QUESTION:
         # action or frontend success state, remove it when the retrieved layer
         # coverage does not verify that connection.
         answer_text = sanitize_practical_guide(
+            answer_text,
+            evidence_coverage,
+        )
+        answer_text = sanitize_unverified_execution_claims(
             answer_text,
             evidence_coverage,
         )
