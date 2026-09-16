@@ -2783,6 +2783,120 @@ def is_architecture_question(question):
     return bool(has_feature and (has_guidance or question_form))
 
 
+
+def is_codebase_location_question(question):
+    """
+    Detect requests asking WHERE a project concept/class/service/config/function
+    is defined, implemented, registered, configured, or used.
+    Supports English, Roman Urdu, Urdu script, filenames and symbols.
+    """
+    raw = str(question or "").strip()
+    q = _normalize_intent_text(raw)
+
+    location_signals = (
+        "where is", "where are", "where do", "where does", "which file",
+        "what file", "which folder", "what folder", "location of",
+        "defined where", "implemented where", "registered where",
+        "configured where", "where configured", "where registered",
+        "where implemented", "where defined", "where used",
+        "kis jaga", "kis jagah", "kahan", "kidhar", "kon si file",
+        "kaunse file", "kaunse files", "kis file", "kin files",
+        "kis folder", "kin folders", "kahan para", "kahan pada",
+        "kahan hai", "kidhar hai", "location bata", "jaga bata",
+        "کہاں", "کس جگہ", "کس فائل", "کون سی فائل", "کن فائل",
+        "کس فولڈر", "لوکیشن",
+    )
+    code_signals = (
+        "dependency injection", " di ", "service", "repository", "controller",
+        "handler", "validator", "command", "query", "endpoint", "api",
+        "authentication", "authorization", "jwt", "stripe", "config",
+        "configuration", "middleware", "database", "dbcontext", "entity",
+        "model", "enum", "class", "function", "method", "component", "page",
+        "modal", "route", "axios", "interface", "implementation", "registration",
+        "setting", "helper", "extension", "factory", "feature", "code",
+        ".cs", ".js", ".jsx", ".ts", ".tsx", ".py", ".json", ".sql",
+        "ڈیپنڈنسی", "سروس", "ریپوزٹری", "کنٹرولر", "فائل", "کوڈ",
+    )
+
+    has_location = any(s in q for s in location_signals)
+    has_code_subject = any(s in f" {q} " for s in code_signals)
+
+    # A named source symbol/file + location wording is always a codebase lookup.
+    named_file = bool(re.search(
+        r"\b[A-Za-z0-9_.-]+\.(?:js|jsx|ts|tsx|cs|py|json|sql|css|scss|html)\b",
+        raw, flags=re.IGNORECASE
+    ))
+    symbolish = bool(re.search(
+        r"\b(?:[A-Z][A-Za-z0-9_]{2,}|[A-Za-z0-9_]+(?:Command|Handler|Repository|Controller|Service|Validator|Extensions|Modal|Page))\b",
+        raw
+    ))
+
+    return bool(has_location and (has_code_subject or named_file or symbolish))
+
+
+def get_codebase_lookup_queries(question):
+    """Generate bounded literal MCP searches for code-location questions."""
+    raw = str(question or "").strip()
+    q = _normalize_intent_text(raw)
+    queries = []
+
+    def add(*vals):
+        for v in vals:
+            v = str(v or "").strip()
+            if len(v) >= 2 and v.lower() not in {x.lower() for x in queries}:
+                queries.append(v)
+
+    # Strong aliases for common cross-cutting concepts.
+    alias_groups = (
+        (("dependency injection", " di "), (
+            "ServiceCollectionExtensions", "IServiceCollection", "AddScoped",
+            "AddTransient", "AddSingleton", "InstallApplicationServices",
+            "AuthenticationExtensions"
+        )),
+        (("authentication", "jwt"), (
+            "AuthenticationExtensions", "AddAuthentication", "AddJwtBearer",
+            "TokenValidationParameters"
+        )),
+        (("database", "dbcontext"), ("DbContext", "ConnectionString", "Repository")),
+        (("stripe", "payment"), ("CheckoutForm", "Payment.js", "loadStripe")),
+        (("repository",), ("Repository", "IRepository")),
+        (("controller", "endpoint", "api"), ("Controller", "HttpGet", "HttpPost")),
+    )
+    padded = f" {q} "
+    for needles, aliases in alias_groups:
+        if any(n in padded for n in needles):
+            add(*aliases)
+
+    # Preserve explicit filenames and likely C#/JS symbols.
+    add(*extract_named_source_files(raw))
+    symbols = re.findall(
+        r"\b[A-Za-z_][A-Za-z0-9_]*(?:Command|Handler|Repository|Controller|Service|Validator|Extensions|Modal|Page|Context)\b",
+        raw
+    )
+    add(*symbols)
+
+    # Strip question/location filler and search the remaining concept literally.
+    concept = q
+    fillers = (
+        "where is", "where are", "where do", "where does", "which file",
+        "what file", "which folder", "what folder", "location of",
+        "kis jaga", "kis jagah", "kahan", "kidhar", "kis file",
+        "kon si file", "kaunse file", "kin files", "kis folder",
+        "kahan para hua hai", "kahan para", "kahan hai", "location bata",
+        "jaga bata", "کہاں", "کس جگہ", "کس فائل", "کون سی فائل",
+        "کن فائل", "کس فولڈر", "لوکیشن",
+    )
+    for f in fillers:
+        concept = concept.replace(f, " ")
+    concept = re.sub(
+        r"\b(?:shipra|project|codebase|mujhe|mujhy|batao|bata|please|hai|hain|ka|ki|ke|mein|me)\b",
+        " ", concept
+    )
+    concept = re.sub(r"\s+", " ", concept).strip(" ?")
+    add(concept)
+
+    return queries[:8]
+
 def detect_request_profile(question):
     """Deterministically identify Shipra scope, entity, action, and request mode."""
     raw = str(question or "").strip()
@@ -2792,6 +2906,15 @@ def detect_request_profile(question):
         "why using", "why use", "what does", "what is", "explain",
         "purpose of", "used for", "use of", "working of", "kis liye", "kyun", "q use"
     ))
+
+    # Exact codebase-location lookup: "DI kahan hai?", "where is JWT configured?", etc.
+    if is_codebase_location_question(raw):
+        return {
+            "scope": "project",
+            "mode": PROJECT_EXISTING,
+            "action": "locate",
+            "entity": raw,
+        }
 
     # Architecture/development-guidance questions describe how Shipra is structured.
     # They are NOT end-user workflows and NOT requests to implement a feature right now.
@@ -3158,6 +3281,10 @@ def get_mcp_seed_queries(question, search_results):
             value = str(value or "").strip()
             if len(value) >= 3 and value not in seeds:
                 seeds.append(value)
+
+    # Codebase-location questions need literal symbol/concept searches first.
+    if is_codebase_location_question(question):
+        add(*get_codebase_lookup_queries(question))
 
     # Architecture questions need representative evidence across project layers,
     # not a fake search for one feature workflow.
@@ -3574,6 +3701,17 @@ def get_request_semantic_contract(question):
 def evidence_matches_request(item, question):
     if item.get("source_type") == "mock_data":
         return True
+
+    # Location lookup is evidence-by-symbol/path, not a create/update/delete workflow.
+    if is_codebase_location_question(question):
+        searchable = (
+            str(item.get("file_path") or "") + "\n" +
+            str(item.get("symbol") or "") + "\n" +
+            str(item.get("text") or "")
+        ).lower()
+        queries = get_codebase_lookup_queries(question)
+        return any(str(q).lower() in searchable for q in queries if len(str(q).strip()) >= 2)
+
     contract=get_request_semantic_contract(question)
     path=str(item.get("file_path") or "").replace("\\\\","/").lower()
     body=str(item.get("text") or "").lower()
