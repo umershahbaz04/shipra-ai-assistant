@@ -5548,50 +5548,66 @@ def build_evidence_coverage(question, results):
 
 
 def build_verified_capabilities(results):
-    """Derive conservative capabilities from exact retrieved executable snippets."""
-    joined = "\n".join(
-        str(item.get("content") or item.get("snippet") or item.get("text") or "")
-        for item in (results or [])
-    )
-    paths = [
-        str(item.get("file_path") or item.get("path") or "").replace("\\", "/").lower()
-        for item in (results or [])
-    ]
+    """Conservative, source-scoped executable evidence."""
+    def executable_only(raw):
+        raw = str(raw or "")
+        raw = re.sub(r"/\*.*?\*/", "", raw, flags=re.S)
+        raw = re.sub(r"^\s*///.*?$", "", raw, flags=re.M)
+        raw = re.sub(r"^\s*//.*?$", "", raw, flags=re.M)
+        return raw
 
-    # Remove comments before executable-evidence checks so comments cannot prove behavior.
-    executable = re.sub(r"/\*.*?\*/", "", joined, flags=re.S)
-    executable = re.sub(r"//.*?$", "", executable, flags=re.M)
+    sources = []
+    for item in (results or []):
+        path = str(item.get("file_path") or item.get("path") or "").replace("\\", "/")
+        raw = str(item.get("content") or item.get("snippet") or item.get("text") or "")
+        sources.append({"path": path, "path_lower": path.lower(), "exec": executable_only(raw)})
 
-    def has(pattern):
-        return bool(re.search(pattern, executable, flags=re.I | re.S))
+    def any_source(pattern, path_pattern=None):
+        for s in sources:
+            if path_pattern and not re.search(path_pattern, s["path"], flags=re.I):
+                continue
+            if re.search(pattern, s["exec"], flags=re.I | re.S):
+                return True
+        return False
 
-    caps = {
-        "frontend_verified": any("shipra.frontend/" in p for p in paths),
-        "http_route_verified": has(
+    def same_source(*patterns, path_pattern=None):
+        for s in sources:
+            if path_pattern and not re.search(path_pattern, s["path"], flags=re.I):
+                continue
+            if all(re.search(p, s["exec"], flags=re.I | re.S) for p in patterns):
+                return True
+        return False
+
+    product_handler = r"ProductFeatures/.*/CreateProduct/.*Handler\.cs$"
+
+    return {
+        "frontend_verified": any("shipra.frontend/" in s["path_lower"] for s in sources),
+        "http_route_verified": any_source(
             r"\[(HttpGet|HttpPost|HttpPut|HttpDelete|Route)\b|"
             r"\b(MapGet|MapPost|MapPut|MapDelete)\s*\("
         ),
-        "sku_lookup_verified": has(r"GetProductBySKUAsync\s*\("),
-        "product_create_verified": has(r"CreateProductAsync\s*\("),
-        "store_link_verified": has(r"CreateStoreProduct\s*\("),
-        "variant_build_verified": has(r"GetProductVariants\s*\("),
-        "variant_persist_verified": has(r"CreateProductVariantsAsync\s*\("),
-        "inventory_build_verified": has(r"GetInventoryBalances\s*\("),
-        "inventory_persist_verified": has(
-            r"(Create|Add|Save|Update)InventoryBalance\w*\s*\("
+        "sku_lookup_verified": any_source(r"\bGetProductBySKUAsync\s*\(", product_handler),
+        "product_create_verified": any_source(r"\bCreateProductAsync\s*\(", product_handler),
+        "store_link_verified": any_source(r"\bCreateStoreProduct\s*\(", product_handler),
+        "variant_build_verified": any_source(r"\bGetProductVariants\s*\(", product_handler),
+        "variant_persist_verified": any_source(r"\bCreateProductVariantsAsync\s*\(", product_handler),
+        "inventory_build_verified": any_source(r"\bGetInventoryBalances\s*\(", product_handler),
+        "inventory_persist_verified": same_source(
+            r"\bGetInventoryBalances\s*\(",
+            r"\b(?:Create|Add|Save|Update|Insert)\w*InventoryBalance\w*(?:Async)?\s*\(",
+            path_pattern=product_handler,
         ),
-        "history_create_verified": has(
-            r"(Create|Add|Save)\w*(StockHistory|InventoryHistory)\w*\s*\("
+        "history_create_verified": any_source(
+            r"\b(?:Create|Add|Save|Insert)\w*(?:StockHistory|InventoryHistory)\w*(?:Async)?\s*\(",
+            product_handler,
         ),
-        "success_return_verified": has(
-            r"return\s+(response|serviceResult)\s*;"
-        ) and has(
-            r"(IsSuccess\s*=\s*true|Created Successfully|Updated Successfully|"
-            r"new\s+ServiceResultDTO\s*\(\s*new\s+BaseResponseDto)"
+        "success_return_verified": same_source(
+            r"\b(?:response|serviceResult)\.IsSuccess\s*=\s*true\b|"
+            r"\bServiceResultDTO\s*\([^;]*(?:success|true)",
+            r"\breturn\s+(?:response|serviceResult)\s*;",
+            path_pattern=product_handler,
         ),
     }
-    return caps
-
 
 def build_evidence_driven_backend_guide(question, capabilities):
     """Create a concise process guide only from positively verified capabilities."""
@@ -5695,89 +5711,73 @@ def replace_backend_guide_with_verified_capabilities(answer, question, coverage,
 
 
 def sanitize_code_flow_explanations(answer, capabilities):
-    """Keep code explanations inside the same executable-evidence boundary as the guide."""
+    """Apply the same verified boundary to code-flow prose."""
     if not answer or "### Actual Project Code Flow" not in answer:
         return answer
 
     caps = capabilities or {}
-    lines = []
-    for line in answer.splitlines():
+    output = []
+
+    for original in answer.splitlines():
+        line = original
         low = line.lower()
+        prefix_match = re.match(r"^(\s*(?:[-*]|\d+\.)\s*)", line)
+        prefix = prefix_match.group(1) if prefix_match else ""
 
-        # Inventory balance construction is verified, but persistence is a separate capability.
-        if caps.get("inventory_build_verified") and not caps.get("inventory_persist_verified"):
-            if "inventory balance" in low and re.search(
-                r"\b(persist|persists|persisted|save|saves|saved|create in database|created in database)\b",
-                low,
-            ):
-                # Preserve the verified construction/check without claiming unseen persistence.
-                indent = re.match(r"^\s*", line).group(0)
-                prefix = ""
-                m = re.match(r"^(\s*(?:[-*]|\d+\.)\s*)", line)
-                if m:
-                    prefix = m.group(1)
-                    indent = ""
-                line = (
-                    f"{indent}{prefix}**Inventory balances** – Builds inventory-balance "
-                    "records from the generated variants and stock data. The visible excerpt "
-                    "then checks whether records exist; persistence is not visible in the "
-                    "supplied excerpt."
-                )
-
-        # Comments cannot establish stock/inventory history execution.
-        if not caps.get("history_create_verified") and re.search(
-            r"\b(stock history|stockhistory|inventory history|inventoryhistory)\b",
-            low,
-        ):
-            # Evidence-gap statements are allowed; execution claims are not.
-            if not any(
-                phrase in low
-                for phrase in (
-                    "not shown", "not visible", "not verified", "inferred from comments",
-                    "comment", "evidence gap", "omitted",
-                )
-            ):
-                continue
-
-        # No verified success return => remove/qualify success/failure-return claims.
-        if not caps.get("success_return_verified") and (
-            "returns a serviceresultdto" in low
-            or "return success" in low
-            or "returns success" in low
-            or "indicating success or failure" in low
-            or "success response" in low
-        ):
-            if re.match(r"^\s*\d+\.", line) or re.match(r"^\s*[-*]", line):
-                continue
-            line = (
-                "The supplied executable excerpt does not show the final success/failure "
-                "return behavior."
-            )
-
-        # No HTTP route evidence => strip transport claims from code explanations too.
         if not caps.get("http_route_verified") and (
-            "http request" in low
-            or "api endpoint" in low
-            or "http endpoint" in low
+            "http request" in low or "api endpoint" in low or "http endpoint" in low
             or re.search(r"\b(post|get|put|delete)\s+request\b", low)
         ):
             continue
 
-        # Do not turn comments into executable duplicate-SKU rejection.
-        if "sku" in low and not re.search(r"\bthrow\b", answer, flags=re.I):
-            if ("operation fails" in low or "throws an exception" in low) and (
-                "comment" not in low and "not visible" not in low and "not shown" not in low
+        if caps.get("inventory_build_verified") and not caps.get("inventory_persist_verified"):
+            if "inventory balance" in low and re.search(
+                r"\b(persist|persists|persisted|save|saves|saved)\b", low
             ):
                 line = (
-                    "The executable excerpt verifies the SKU lookup and the "
-                    "`existedProduct is null` creation branch; the duplicate-SKU rejection "
-                    "behavior is not visible in the supplied excerpt."
+                    prefix
+                    + "Inventory balances – The visible code builds inventory-balance records "
+                    "and checks whether the resulting list contains entries. Persistence is not "
+                    "visible in the supplied excerpt."
                 )
+                low = line.lower()
 
-        lines.append(line)
+            if "inventory balance" in low and re.search(
+                r"\bwould\s+(?:create|persist|save|insert)\b", low
+            ):
+                line = (
+                    prefix
+                    + "The visible excerpt verifies the inventory-balance build and the "
+                    "`if (...Any())` check. The operations inside the truncated block are not visible."
+                )
+                low = line.lower()
 
-    return "\n".join(lines)
+        if not caps.get("history_create_verified") and re.search(
+            r"\b(stock history|stockhistory|inventory history|inventoryhistory)\b", low
+        ):
+            if not any(x in low for x in (
+                "not shown", "not visible", "not verified", "inferred from comments",
+                "comment", "evidence gap", "omitted"
+            )):
+                continue
 
+        if not caps.get("success_return_verified"):
+            # Explicit invisible-return wording always wins over the earlier generic removal.
+            if "return statement is not visible" in low or "return is not visible" in low:
+                line = prefix + "The final handler return behavior is not visible in the supplied excerpt."
+                low = line.lower()
+            elif (
+                "returns a serviceresultdto" in low
+                or "return success" in low
+                or "returns success" in low
+                or "indicating success or failure" in low
+                or "success response" in low
+            ):
+                continue
+
+        output.append(line)
+
+    return "\n".join(output)
 
 def sanitize_unverified_execution_claims(answer, coverage):
     """Remove common execution claims that require evidence layers not retrieved."""
@@ -6323,6 +6323,7 @@ ACCURACY CONTRACT:
 - If an excerpt ends immediately after constructing data or opening an if/loop/block, describe only the visible construction/check; do not claim what the unseen continuation does.
 - For backend-only workflow guides, executable method calls are stronger evidence than comments. Never promote comments, DTO property names, or truncated continuation into completed behavior.
 - Apply the same evidence boundary to every `What this code does` section and Evidence Gaps: if persistence/history/success is beyond the visible excerpt, explicitly say it is not visible instead of describing it as completed.
+- Keep evidence source-scoped. Never combine different files/snippets to prove one completed operation. Persistence and success require decisive executable statements in the same relevant handler snippet.
 - Never turn semantic similarity into a project fact.
 - The entity requested by the user and the operation requested by the user
   must both match the code before you present usage steps.
