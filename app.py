@@ -5494,6 +5494,58 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
     return "\n".join(parts)
 
 
+def build_evidence_coverage(question, results):
+    """Describe only the project layers actually verified by MCP."""
+    paths = [
+        str(item.get("file_path") or item.get("path") or "")
+        .replace("\\", "/")
+        .lower()
+        for item in (results or [])
+    ]
+
+    profile = detect_request_profile(question)
+    action = str(profile.get("action") or "").strip().lower()
+    workflow = action in {
+        "create", "update", "delete", "assign", "connect",
+        "sync", "import", "export",
+    }
+
+    coverage = {
+        "frontend": any("shipra.frontend/" in p for p in paths),
+        "api_client": any(
+            ("axiosinterceptors" in p) or ("/api/" in p)
+            for p in paths
+        ),
+        "controller": any("controller" in p for p in paths),
+        "command_handler": any(
+            ("command" in p) or ("handler" in p) or ("query" in p)
+            for p in paths
+        ),
+        "validator": any("validator" in p for p in paths),
+        "repository_domain": any(
+            ("repository" in p) or ("api.core/" in p) or ("/core/" in p)
+            for p in paths
+        ),
+    }
+
+    if not workflow:
+        return coverage, ""
+
+    present = [k for k, v in coverage.items() if v]
+    missing = [k for k, v in coverage.items() if not v]
+
+    note = (
+        "VERIFIED EVIDENCE COVERAGE:\\n"
+        f"Present: {', '.join(present) if present else 'none'}\\n"
+        f"Missing: {', '.join(missing) if missing else 'none'}\\n"
+        "Use concrete user-facing workflow steps only when frontend evidence "
+        "supports them. Backend/domain evidence can explain system behavior, "
+        "but it cannot prove a screen, button, field, modal, or navigation path. "
+        "Never fill a missing layer by inference."
+    )
+    return coverage, note
+
+
 def ask_shipra_project_ai(question, intent):
     response_language = get_response_language(question)
     code_explanation_heading = (
@@ -5703,6 +5755,11 @@ def ask_shipra_project_ai(question, intent):
             if item.get("source_type") == "mock_data"
         ]
 
+    evidence_coverage, evidence_coverage_note = build_evidence_coverage(
+        question,
+        results,
+    )
+
     context = build_context(results, search_question)
 
     # SPEED: keep full verified MCP results for code injection/fallback, but limit
@@ -5745,6 +5802,11 @@ ACCURACY CONTRACT:
   * do not invent usage steps for the missing operation.
 - Treat only that verified evidence as factual project truth.
 - Accuracy is more important than completeness.
+- Prefer directly relevant files over files that merely share similar names.
+- Cross-check frontend actions against backend behavior when both are verified.
+- Never convert a domain entity/model into a user-facing workflow step.
+- If two verified sources conflict, state the conflict instead of silently choosing one.
+- A file name alone never proves that a screen, route, action, or workflow is reachable.
 - Never turn semantic similarity into a project fact.
 - The entity requested by the user and the operation requested by the user
   must both match the code before you present usage steps.
@@ -5757,6 +5819,9 @@ ACCURACY CONTRACT:
   connection as an evidence gap.
 - Existing-feature usage questions must not receive newly proposed code just
   because some evidence is missing.
+
+VERIFIED LAYER COVERAGE:
+{evidence_coverage_note}
 
 Conversation context (may be empty):
 {conversation_text}
@@ -5973,65 +6038,6 @@ USER QUESTION:
 {question}
 """
 
-    scenario_prompt = f"""
-Write a concise, professional, genuinely step-by-step Practical Scenario Guide
-in {response_language} for the user's Shipra question.
-
-The guide must read like an ordered workflow a client/user can actually follow:
-first do this, then do this, then do this. Keep only the main actions, but preserve
-their real execution order from MCP-verified frontend evidence.
-
-Rules:
-- Use a numbered list only: 1., 2., 3., ...
-- Prefer 3-6 steps; use fewer when the verified workflow is shorter.
-- Each step must contain ONE main user action, followed by at most one short
-  supporting sentence when needed.
-- Start each step with a clear action verb such as Open, Navigate, Select, Enter,
-  Choose, Click, Review, Confirm, Save, Submit, Sync, Filter, or Search.
-- Put prerequisites/setup before data entry, data entry before submission, and
-  submission before the expected outcome.
-- Do not repeat the same action in multiple steps.
-- Do not turn source-code internals (state initialization, useEffect, mapping,
-  parsing JSON, repository calls, mediator calls, handlers) into user actions.
-- Backend evidence may explain/verify what happens AFTER a user action, but it
-  must never be presented as a screen step unless matching frontend evidence
-  verifies that user action.
-- If the question says "create X section/page" but the sources show that X already
-  exists, say that clearly in the opening step/statement and guide the user through
-  the verified existing workflow. Do not pretend the user must build a new section.
-- If the user truly asks for a new code/project change, do not disguise a proposed
-  implementation as an existing UI workflow.
-- Mention screen/control names only when MCP-verified frontend evidence supports them.
-- If exact navigation/menu/button text is not verified, use a truthful neutral action
-  such as "Open the existing Draft Orders view" rather than inventing menu clicks.
-- The guide must contain ONLY user-facing steps plus the final Expected Result line.
-- NEVER include source code, code snippets, fenced code blocks, file paths, references,
-  Function/Class labels, API names, handler names, repository names, or implementation
-  explanations inside the Practical Scenario Guide.
-- Do not explain source code in this guide; all technical/code explanation belongs
-  later under Actual Project Code Flow.
-- Do not dump file contents.
-- Do not derive UI steps from backend-only evidence.
-- The requested entity AND requested operation must match the verified evidence.
-- If verification scope is PARTIAL_ENTITY_ONLY, do not invent a complete workflow.
-  State what part is verified, then identify exactly what user-facing action is not
-  verified.
-- End with exactly one short line beginning with "Expected Result:".
-- Keep the guide concise and practical; accuracy is more important than adding steps.
-
-Use only the supplied verified project sources for Shipra-specific facts.
-If a step is not supported by those sources, omit it or state the evidence gap.
-
-- FINAL HARD RULE: The guide body may contain only numbered user actions and one
-  Expected Result line. Never output "Reference:", a file path, code, or technical
-  implementation detail in this section.
-
-Sources:
-{context}
-
-Question:
-{question}
-"""
 
     # FAIL-FAST GENERATION:
     # Exactly one Groq request. No hedge, no fallback-model wait, no retry loop,
