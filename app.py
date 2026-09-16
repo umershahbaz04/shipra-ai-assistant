@@ -5016,15 +5016,18 @@ def _order_status_from_record(record):
 
 
 def detect_order_count_status(question):
-    """Return the requested order status for direct count questions."""
+    """Detect Shipra order-status count questions, including short follow-ups."""
     text = _normalize_order_status(question)
-    if not re.search(r"\b(order|orders)\b", text):
-        return None
-    if not any(re.search(pattern, text) for pattern in (
+
+    # Count language is mandatory. The word "orders" is intentionally NOT
+    # mandatory because users naturally ask follow-ups such as
+    # "how many are pending?" or "kitne delivered hain?" inside Shipra.
+    count_patterns = (
         r"\bhow\s+many\b", r"\bcount\b", r"\bnumber\s+of\b", r"\btotal\b",
         r"\bkitn(?:a|e|i|y|ay|ey)\b",
         r"\bkitnay\b", r"\bkitney\b", r"\bkitni\b", r"\bkitny\b",
-    )):
+    )
+    if not any(re.search(pattern, text) for pattern in count_patterns):
         return None
 
     # COD pending is a receivables/payment concept, not the Pending order status.
