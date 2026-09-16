@@ -5548,7 +5548,7 @@ def build_evidence_coverage(question, results):
 
 
 def sanitize_practical_guide(answer, coverage):
-    """Remove guide claims that require an unverified frontend/API connection."""
+    """Keep the practical guide inside the boundaries of verified project layers."""
     if not answer or "### Practical Scenario Guide" not in answer:
         return answer
 
@@ -5570,33 +5570,70 @@ def sanitize_practical_guide(answer, coverage):
     )
 
     guide = answer[start:end]
-    kept = []
+    lines = guide.splitlines()
 
-    for line in guide.splitlines():
+    # If no frontend source was retrieved, do not transform backend request
+    # properties into instructions for a user. Replace the guide with a safe,
+    # concise process summary and leave exact details to the verified code flow.
+    if not frontend_verified:
+        rebuilt = [
+            scenario_marker,
+            "",
+            (
+                "The retrieved project evidence verifies the backend/system process "
+                "for this workflow, but it does not verify the Shipra frontend screen "
+                "or controls needed to perform it."
+            ),
+            "",
+            "**Verified Process:**",
+            (
+                "1. Follow the verified backend sequence described in the "
+                "**Actual Project Code Flow** below. No unverified screen, field, "
+                "button, or navigation step is presented as a user action."
+            ),
+            "",
+            (
+                "**Expected Result:** Only the backend behavior explicitly verified "
+                "in the code flow below can be confirmed."
+                if backend_verified
+                else
+                "**Expected Result:** Only behavior explicitly supported by the "
+                "retrieved project evidence can be confirmed."
+            ),
+            "",
+            (
+                "**UI Limitation:** The retrieved evidence does not verify which "
+                "Shipra screen, buttons, fields, or frontend API action trigger "
+                "this process."
+            ),
+            "",
+        ]
+        return answer[:start] + "\n".join(rebuilt) + answer[end:]
+
+    # Frontend evidence exists: preserve useful UI steps, but do not claim an
+    # unverified submit/create linkage or an unverified success state.
+    kept = []
+    for line in lines:
         stripped = line.strip()
         low = stripped.lower()
 
         if re.match(r"^\d+\.", stripped):
-            # No verified frontend => no concrete screen/control workflow claims.
-            if not frontend_verified and re.search(
-                r"\b(open|click|press|select|choose|enter|type|navigate|submit)\b",
-                low,
-            ):
-                continue
-
-            # Frontend file existence does not prove submit/create reaches backend.
             if not api_verified and (
-                (re.search(r"\b(click|press)\b", low) and re.search(r"\b(submit|create|save)\b", low))
+                (
+                    re.search(r"\b(click|press)\b", low)
+                    and re.search(r"\b(submit|create|save)\b", low)
+                )
                 or "submit button" in low
                 or "create button" in low
+                or "save button" in low
             ):
                 continue
 
-            # Do not invent confirmation UI from backend creation.
             if not api_verified and (
                 "success toast" in low
                 or "success notification" in low
                 or ("appears" in low and "list" in low)
+                or "redirect" in low
             ):
                 continue
 
@@ -5605,21 +5642,19 @@ def sanitize_practical_guide(answer, coverage):
                 "success toast" in low
                 or "success notification" in low
                 or ("appears" in low and "list" in low)
+                or "redirect" in low
             ):
-                if backend_verified:
-                    line = (
-                        "**Expected Result:** The verified backend creation behavior "
-                        "is completed; the exact frontend confirmation is not verified."
-                    )
-                else:
-                    line = (
-                        "**Expected Result:** Only the behavior explicitly verified "
-                        "by the retrieved project evidence can be confirmed."
-                    )
+                line = (
+                    "**Expected Result:** The verified backend behavior is completed; "
+                    "the exact frontend confirmation is not verified."
+                    if backend_verified
+                    else
+                    "**Expected Result:** Only behavior explicitly verified by the "
+                    "retrieved project evidence can be confirmed."
+                )
 
         kept.append(line)
 
-    # Renumber surviving practical steps.
     n = 0
     fixed = []
     for line in kept:
@@ -5629,7 +5664,6 @@ def sanitize_practical_guide(answer, coverage):
         fixed.append(line)
 
     return answer[:start] + "\n".join(fixed).rstrip() + "\n\n" + answer[end:]
-
 
 def ask_shipra_project_ai(question, intent):
     response_language = get_response_language(question)
@@ -5894,6 +5928,7 @@ ACCURACY CONTRACT:
 - A file name alone never proves that a screen, route, action, or workflow is reachable.
 - Do not write a Submit/Create/Save button step unless retrieved frontend evidence shows that action and its handler/linkage.
 - Do not claim a success toast, redirect, list refresh, or newly displayed record unless retrieved frontend evidence explicitly shows that outcome.
+- If frontend evidence is absent for a workflow question, do not convert backend request properties into user-interface steps. Keep the guide backend/process-only and explicitly state the UI evidence gap.
 - Never turn semantic similarity into a project fact.
 - The entity requested by the user and the operation requested by the user
   must both match the code before you present usage steps.
