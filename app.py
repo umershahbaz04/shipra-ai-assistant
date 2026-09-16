@@ -7927,14 +7927,60 @@ for conversation in list_conversations():
 
 
 def render_message_copy_button(content, key, align="left"):
-    """Native Streamlit copy UI; avoids custom iframe components."""
+    import streamlit.components.v1 as components
+    import json
+
     text_value = str(content or "")
-    if hasattr(st, "popover"):
-        with st.popover("⧉", help="Copy message"):
-            st.code(text_value, language=None)
-    else:
-        with st.expander("⧉ Copy"):
-            st.code(text_value, language=None)
+    text_json = json.dumps(text_value)
+
+    components.html(
+        f"""
+        <div style="
+            display:flex;
+            justify-content:{'flex-end' if align == 'right' else 'flex-start'};
+            margin:0;
+            padding:0;
+            height:30px;
+        ">
+            <button
+                id="copy-btn"
+                title="Copy"
+                onclick='copyText()'
+                style="
+                    background:transparent;
+                    border:none;
+                    color:#aeb2b8;
+                    cursor:pointer;
+                    padding:3px 5px;
+                    margin:0;
+                    border-radius:6px;
+                    font-size:18px;
+                    line-height:20px;
+                "
+                onmouseover="this.style.background='rgba(255,255,255,0.08)'; this.style.color='#ffffff';"
+                onmouseout="this.style.background='transparent'; this.style.color='#aeb2b8';"
+            >
+                ⧉
+            </button>
+        </div>
+
+        <script>
+            function copyText() {{
+                navigator.clipboard.writeText({text_json}).then(() => {{
+                    const btn = document.getElementById("copy-btn");
+                    btn.innerHTML = "✓";
+                    btn.title = "Copied";
+
+                    setTimeout(() => {{
+                        btn.innerHTML = "⧉";
+                        btn.title = "Copy";
+                    }}, 1200);
+                }});
+            }}
+        </script>
+        """,
+        height=30,
+    )
 
 
 # Render the selected conversation above the sticky composer.
@@ -7968,6 +8014,7 @@ for message_index, message in enumerate(st.session_state["chat_history"]):
             render_message_copy_button(
                 message["content"],
                 f"history_assistant_{message_index}",
+                align="left",
             )
 
 
