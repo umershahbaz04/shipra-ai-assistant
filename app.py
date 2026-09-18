@@ -1,5 +1,5 @@
 import os
-SHIPRA_ROUTER_VERSION = "v7-agentic"
+SHIPRA_ROUTER_VERSION = "v13-order-detail-data-fixed"
 import sys
 import json
 import math
@@ -1560,13 +1560,26 @@ def tokenize(text):
 
 @st.cache_resource(show_spinner="Loading Shipra knowledge base...")
 def load_data():
-    with open("chunks.json", "r", encoding="utf-8") as file:
+    app_dir = Path(__file__).resolve().parent
+    chunks_path = app_dir / "chunks.json"
+    metadata_path = app_dir / "metadata.json"
+    index_path = app_dir / "faiss.index"
+
+    required_files = (chunks_path, metadata_path, index_path)
+    missing_files = [str(path) for path in required_files if not path.is_file()]
+    if missing_files:
+        raise FileNotFoundError(
+            "Shipra knowledge-base files are missing beside the app: "
+            + ", ".join(missing_files)
+        )
+
+    with chunks_path.open("r", encoding="utf-8") as file:
         chunks = json.load(file)
 
-    with open("metadata.json", "r", encoding="utf-8") as file:
+    with metadata_path.open("r", encoding="utf-8") as file:
         metadata = json.load(file)
 
-    index = faiss.read_index("faiss.index")
+    index = faiss.read_index(str(index_path))
     embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
     if len(chunks) != len(metadata):
@@ -2932,6 +2945,121 @@ def normalize_business_status_semantically(question):
             return status
     return None
 
+
+def is_order_detail_data_question(question):
+    q = _normalize_intent_text(question)
+    order_context = bool(re.search(r"\b(?:order|this order|that order|it)\b", q))
+    detail_signals = (
+        "exact date", "date and time", "exact time", "when delivered",
+        "when it delivered", "when it's delivered", "when was it delivered",
+        "delivery time", "delivered at", "delivered on", "delivery date",
+        "tracking time", "tracking history", "status history",
+        "kis date", "kis time", "kab deliver", "kab delivered",
+        "kab pohanch", "date time", "tareekh", "waqt",
+    )
+    return bool(order_context and any(signal in q for signal in detail_signals))
+
+
+def resolve_context_order_number(question, conversation_text=""):
+    explicit = re.findall(r"\bORD-\d+\b", str(question or ""), flags=re.IGNORECASE)
+    if explicit:
+        return explicit[-1].upper()
+    contextual = re.findall(r"\bORD-\d+\b", str(conversation_text or ""), flags=re.IGNORECASE)
+    return contextual[-1].upper() if contextual else None
+
+
+def _extract_delivery_timestamp(record):
+    direct_keys = (
+        "deliveredAt", "delivered_at", "DeliveredAt",
+        "deliveryDateTime", "delivery_datetime", "DeliveryDateTime",
+        "deliveredDate", "deliveryDate", "DeliveredDate", "DeliveryDate",
+        "deliveredOn", "DeliveredOn",
+    )
+    for key in direct_keys:
+        value = record.get(key)
+        if value not in (None, ""):
+            return str(value)
+
+    for history_key in (
+        "trackingHistory", "tracking_history", "statusHistory",
+        "status_history", "orderTrackingHistory", "tracking",
+    ):
+        history = record.get(history_key)
+        if not isinstance(history, list):
+            continue
+        for item in reversed(history):
+            if not isinstance(item, dict):
+                continue
+            status = str(
+                item.get("status") or item.get("statusName")
+                or item.get("orderStatus") or item.get("trackingStatus") or ""
+            ).casefold()
+            if "deliver" not in status:
+                continue
+            for time_key in (
+                "dateTime", "datetime", "timestamp", "createdAt",
+                "created_at", "statusDate", "trackingDate", "date",
+            ):
+                value = item.get(time_key)
+                if value not in (None, ""):
+                    return str(value)
+    return None
+
+
+def build_order_delivery_time_answer(question, results, response_language, order_no=None):
+    mock_results = [r for r in results if r.get("source_type") == "mock_data"]
+    records = []
+    for result in mock_results:
+        raw = str(result.get("text", "")).strip()
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = parse_json_object(raw)
+        if isinstance(parsed, dict):
+            if isinstance(parsed.get("orders"), list):
+                records.extend(x for x in parsed["orders"] if isinstance(x, dict))
+            elif isinstance(parsed.get("matches"), list):
+                records.extend(x for x in parsed["matches"] if isinstance(x, dict))
+            elif parsed.get("orderNo"):
+                records.append(parsed)
+        elif isinstance(parsed, list):
+            records.extend(x for x in parsed if isinstance(x, dict))
+
+    if order_no:
+        records = [r for r in records if str(r.get("orderNo", "")).upper() == order_no.upper()]
+
+    if not records:
+        return (
+            "Requested order ka verified runtime record nahi mila."
+            if response_language == "Roman Urdu"
+            else "I couldn't retrieve the requested order from verified runtime data."
+        )
+
+    record = records[0]
+    actual_order_no = str(record.get("orderNo") or order_no or "this order")
+    status = str(record.get("orderStatus") or record.get("status") or record.get("orderStatusName") or "")
+    delivered_at = _extract_delivery_timestamp(record)
+
+    if delivered_at:
+        if response_language == "Roman Urdu":
+            return f"**{actual_order_no}** verified record ke mutabiq **{delivered_at}** par delivered hua tha."
+        return f"According to the verified record, **{actual_order_no}** was delivered at **{delivered_at}**."
+
+    status_note = f" Current status **{status}** hai." if status else ""
+    if response_language == "Roman Urdu":
+        return (
+            f"**{actual_order_no}** ka exact delivery date/time verified record mein "
+            f"available nahi hai.{status_note} Main timestamp guess nahi karunga."
+        )
+    status_note = f" Its current status is **{status}**." if status else ""
+    return (
+        f"The verified record for **{actual_order_no}** does not contain an exact "
+        f"delivery date/time.{status_note} I won't guess the timestamp."
+    )
+
+
 def is_data_aggregate_question(question):
     """
     Universal detector for factual aggregate questions over Shipra business data.
@@ -3098,7 +3226,7 @@ Understand English, Urdu, Roman Urdu, mixed language, typos, paraphrases, and in
 Return JSON ONLY:
 {{
   "intent": "codebase_location|data_query|architecture_guidance|project_workflow|code_explanation|general",
-  "action": "locate|count|explain|guide|workflow|general",
+  "action": "locate|count|lookup|explain|guide|workflow|general",
   "entity": "short subject or null",
   "status": "status/filter or null",
   "confidence": 0.0
@@ -3107,6 +3235,7 @@ Return JSON ONLY:
 Rules:
 - Asking where code/config/class/function/service is located => codebase_location.
 - Asking count/total/how many of business records, optionally by status => data_query.
+- Asking for a factual field/value of a specific business record (for example an order exact delivery date/time, tracking number, carrier, payment value, or status history) => data_query with action lookup.
 - Understand outcome paraphrases semantically: e.g. "customer ko pohanchne wale orders" means delivered orders; do not require the literal word delivered.
 - Asking which layers/files/steps are needed to add/build a feature => architecture_guidance.
 - Asking how an existing Shipra feature/process works or is performed => project_workflow.
@@ -3164,6 +3293,11 @@ def get_hybrid_route(question):
                 "entity": c.get("entity"), "status": c.get("status"),
                 "confidence": 1.0, "source": "fast_path"}
 
+    if is_order_detail_data_question(raw):
+        return {"intent": "data_query", "action": "lookup",
+                "entity": "orders", "status": None,
+                "confidence": 1.0, "source": "fast_path"}
+
     if is_codebase_location_question(raw):
         return {"intent": "codebase_location", "action": "locate",
                 "entity": raw, "status": None,
@@ -3218,7 +3352,7 @@ def resolve_authoritative_route(question):
         route = dict(route)
         route["entity"] = contract.get("entity") or route.get("entity")
         route["status"] = contract.get("status") or route.get("status")
-        route["action"] = route.get("action") or "count"
+        route["action"] = route.get("action") or ("lookup" if is_order_detail_data_question(question) else "count")
 
     return route
 
@@ -3242,6 +3376,13 @@ def detect_request_profile(question):
         "why using", "why use", "what does", "what is", "explain",
         "purpose of", "used for", "use of", "working of", "kis liye", "kyun", "q use"
     ))
+
+    # Business-data detail lookup: exact fields/timestamps for one record.
+    if is_order_detail_data_question(raw):
+        return {
+            "scope": "data", "mode": "data_query", "action": "lookup",
+            "entity": "orders", "status": None,
+        }
 
     # Business-data aggregate lookup: counts/totals/status questions are data queries,
     # never Practical Scenario workflows.
@@ -3292,24 +3433,41 @@ def detect_request_profile(question):
         "implement feature", "add feature", "build feature",
         "new endpoint", "new api", "add api", "create api",
         "code change", "source code change", "refactor",
+        "give me code", "with code", "full code", "complete code",
+        "implementation code", "implement this", "code bana", "code banao",
     )
-    explicit_code_change = any(
-        phrase in lowered for phrase in explicit_change_phrases
-    ) or bool(re.search(
-        r"\b(?:add|implement|build|develop|create)\s+(?:(?:a|an)\s+)?(?:new\s+)?feature\b",
+
+    change_artifact_pattern = re.search(
+        r"\b(?:add|create|build|implement|develop|make)\s+"
+        r"(?:(?:a|an|new)\s+){0,2}"
+        r"(?:button|field|input|dropdown|select|checkbox|toggle|modal|dialog|"
+        r"form|page|screen|tab|table|column|menu|component|endpoint|api|route|"
+        r"controller|command|query|handler|validator|repository|service|method|"
+        r"function|class|feature)\b",
+        lowered,
+    )
+
+    code_delivery_request = bool(re.search(
+        r"\b(?:full|complete|end[- ]?to[- ]?end)\s+(?:flow|implementation)"
+        r"(?:\s+with\s+code)?\b|\bwith\s+code\b|\bgive\s+me\s+(?:the\s+)?code\b",
         lowered,
     ))
 
-    # A request to create a UI/control is a source-code change even when the
-    # user naturally says "how to create".  Previously this was routed as an
-    # existing-feature workflow, causing the answer to invent clicks and API
-    # behaviour from an unrelated component import.
-    explicit_code_change = explicit_code_change or bool(re.search(
-        r"\b(?:add|create|build|implement|develop)\s+(?:(?:a|an)\s+)?"
-        r"(?:new\s+)?(?:delete|edit|save|submit|action)?\s*"
-        r"(?:button|modal|component|handler|endpoint|api|route)\b",
-        lowered,
-    ))
+    explicit_code_change = (
+        any(phrase in lowered for phrase in explicit_change_phrases)
+        or bool(change_artifact_pattern)
+        or bool(re.search(
+            r"\b(?:add|implement|build|develop|create)\s+"
+            r"(?:(?:a|an)\s+)?(?:new\s+)?feature\b",
+            lowered,
+        ))
+        or (
+            code_delivery_request
+            and any(word in lowered for word in (
+                "add", "create", "build", "implement", "develop", "change", "modify"
+            ))
+        )
+    )
 
     entity_aliases = [
         ("return order", ("return order", "return orders", "returnorder")),
@@ -3330,6 +3488,7 @@ def detect_request_profile(question):
         ("customer", ("customer", "customers", "client", "clients")),
         ("lead", ("lead", "leads")),
         ("contact", ("contact", "contacts")),
+        ("production station", ("production station", "production stations", "productionstation")),
         ("station", ("station", "stations")),
         ("wallet", ("wallet", "cod wallet")),
         ("settlement", ("settlement", "settlements")),
@@ -3799,11 +3958,41 @@ def get_mcp_seed_queries(question, search_results):
         "import": "Import", "export": "Export",
     }
 
+    # For implementation requests such as "create a button in Production Station",
+    # search the target feature independently from the new artifact.
+    if profile.get("mode") == PROJECT_CHANGE:
+        target_match = re.search(
+            r"\b(?:in|on|inside|under)\s+(?:the\s+)?"
+            r"([a-z0-9][a-z0-9 _-]{2,60}?)(?:\?|$|\s+(?:page|screen|module)\b)",
+            lowered,
+        )
+        if target_match:
+            target_phrase = re.sub(r"\s+", " ", target_match.group(1)).strip(" ?.-")
+            target_phrase = re.sub(
+                r"\b(?:give me|with code|full flow|complete flow)\b.*$",
+                "",
+                target_phrase,
+            ).strip()
+            if target_phrase:
+                target_words = [
+                    w for w in re.findall(r"[A-Za-z0-9]+", target_phrase)
+                    if w.lower() not in discovery_stop_words
+                ][:4]
+                if target_words:
+                    target_pascal = "".join(w[:1].upper() + w[1:] for w in target_words)
+                    add(
+                        " ".join(target_words),
+                        target_pascal,
+                        target_pascal + "Page",
+                        target_pascal + "Index",
+                    )
+
     if action in workflow_actions and meaningful_words:
         action_words = {
             "create", "add", "make", "new", "update", "edit", "change",
             "delete", "remove", "assign", "connect", "sync", "import",
-            "export", "generate",
+            "export", "generate", "implement", "build", "develop",
+            "give", "full", "complete", "flow", "code",
         }
         entity_words = [
             word for word in meaningful_words
@@ -3813,7 +4002,14 @@ def get_mcp_seed_queries(question, search_results):
         if entity_words:
             variants = [entity_words]
             singular = list(entity_words)
-            if singular[-1].lower().endswith("s") and len(singular[-1]) > 3:
+            last = singular[-1].lower()
+            if last.endswith("ies") and len(last) > 4:
+                singular[-1] = singular[-1][:-3] + "y"
+                variants.append(singular)
+            elif last.endswith("ses") and len(last) > 4:
+                singular[-1] = singular[-1][:-2]
+                variants.append(singular)
+            elif last.endswith("s") and not last.endswith("ss") and len(last) > 3:
                 singular[-1] = singular[-1][:-1]
                 variants.append(singular)
 
@@ -3825,10 +4021,17 @@ def get_mcp_seed_queries(question, search_results):
                 add(
                     entity_pascal,
                     prefix + entity_pascal,
+                    "Add" + entity_pascal,
+                    "Save" + entity_pascal,
+                    "Post" + entity_pascal,
                     entity_pascal + "Modal",
                     prefix + entity_pascal + "Modal",
+                    "Add" + entity_pascal + "Modal",
                     entity_pascal + "Form",
                     entity_pascal + "Page",
+                    entity_pascal + "Repository",
+                    prefix + entity_pascal + "Command",
+                    prefix + entity_pascal + "CommandHandler",
                 )
 
     # Reuse exact code identifiers already surfaced by indexed retrieval as
@@ -4077,6 +4280,35 @@ def get_request_semantic_contract(question):
     }
 
 
+def get_concept_variants(concept):
+    """Return conservative lexical/code-name variants for one business concept."""
+    raw = str(concept or "").strip().lower()
+    if not raw:
+        return set()
+
+    variants = {raw}
+
+    # Common English plural normalization used in feature names:
+    # sales -> sale, inventories -> inventory, categories -> category, orders -> order.
+    if raw.endswith("ies") and len(raw) > 4:
+        variants.add(raw[:-3] + "y")
+    elif raw.endswith("ses") and len(raw) > 4:
+        variants.add(raw[:-2])
+    elif raw.endswith("s") and not raw.endswith("ss") and len(raw) > 3:
+        variants.add(raw[:-1])
+
+    # Preserve compact code-identifier matching.
+    return {v for v in variants if v}
+
+
+def concept_matches_searchable(concept, searchable, tokens):
+    variants = get_concept_variants(concept)
+    return any(
+        variant in tokens or variant in searchable
+        for variant in variants
+    )
+
+
 def evidence_matches_request(item, question):
     if item.get("source_type") == "mock_data":
         return True
@@ -4103,10 +4335,18 @@ def evidence_matches_request(item, question):
     concepts=contract["concepts"]; action=contract["action"]; searchable=path+"\n"+str(item.get("symbol") or "").lower()+"\n"+body
     tokens=tokenize(searchable)
     if concepts:
-        matched={c for c in concepts if c in tokens or c in searchable}
-        required=1 if len(concepts)==1 else max(2,len(set(concepts))-1)
-        if len(matched)<required: return False
-        if re.search(r"\borders?\b",str(question or "").lower()) and "order" not in searchable: return False
+        matched = {
+            c for c in concepts
+            if concept_matches_searchable(c, searchable, tokens)
+        }
+        required = 1 if len(concepts) == 1 else max(2, len(set(concepts)) - 1)
+        if len(matched) < required:
+            return False
+        if (
+            re.search(r"\borders?\b", str(question or "").lower())
+            and not concept_matches_searchable("order", searchable, tokens)
+        ):
+            return False
     markers={"create":("create","add","generate","save","submit","post"),"update":("update","edit","modify","patch","put"),"delete":("delete","remove"),"assign":("assign","apply","allocate"),"connect":("connect","connection","activate","link"),"sync":("sync","synchron"),"export":("export","csv","excel","download"),"import":("import","upload"),"filter":("filter","search"),"track":("track","tracking"),"validate":("validat",)}
     if action in markers:
         has_action=any(m in searchable for m in markers[action])
@@ -4198,7 +4438,7 @@ Do not mix creating a label with assigning a label to orders.
 For existing UI flows, inspect the page/modal and relevant called functions.
 Read additional lines when validation or response handling is cut off.
 Each read may contain at most 120 lines.
-You have at most 12 turns. Prioritize decisive evidence.
+You have at most 18 turns. Prioritize decisive evidence.
 Indexed leads are search hints, not live evidence or guaranteed paths.
 For UI usage questions, prioritize the matching frontend page/modal.
 Read the relevant function, then search its exact API call name.
@@ -4233,9 +4473,28 @@ GLOBAL VERIFICATION RULES:
 - Preserve actual execution order from the code.
 - If only part of the requested workflow can be verified, collect that part and
   finish. Do not fill missing layers with related-looking files.
+- Read/query/export handlers for an entity do NOT prove that create/update/delete
+  operations are absent. For a requested mutation, explicitly search mutation
+  identifiers (for example Create<Entity>, Add<Entity>, Save<Entity>, Post<Entity>,
+  matching frontend handlers/API helpers, and repository methods) before finishing.
+- Never state "feature does not exist", "no existing feature", or equivalent from
+  incomplete retrieval. State only which requested operation could not be verified
+  from the searched evidence, while preserving any layers that were verified.
 - Before concluding that a feature is missing, search exact wording, likely
   camel/pascal-case identifiers, page names, and exact API names derived from
   the question.
+- For create/update/delete/assign/connect/sync workflow questions, expand in
+  both directions before finishing: frontend page/modal -> event handler ->
+  imported API helper/endpoint, and command/query -> handler ->
+  repository/service/persistence. Use find_references/trace_call_chain when a
+  strong symbol is available.
+- Compound entity names must tolerate ordinary plural wording when matching
+  code identifiers (for example "inventory sales" may map to InventorySale), while
+  still requiring the requested operation to match.
+- A verified frontend file whose path directly names the requested entity is
+  high-priority evidence. Read its relevant handler before claiming no UI exists.
+- If one layer cannot be verified, report only that layer as unverified. Do not
+  discard verified layers or declare the whole feature missing.
 - Do not propose new implementation code while collecting evidence.
 
 Use conversation only to resolve follow-ups; ignore it for a new topic.
@@ -4486,10 +4745,19 @@ Finish when sufficient verified evidence is collected or the exact search is exh
         bootstrap_matches = []
 
         for seed_query in seed_queries:
+            seed_arguments = {"query": seed_query, "max_results": 30}
+            seed_call_key = "search_code" + json.dumps(
+                seed_arguments,
+                sort_keys=True,
+            )
+            if seed_call_key in completed_calls:
+                continue
+            completed_calls.add(seed_call_key)
+
             try:
                 seed_result = await mcp_client.call_tool(
                     "search_code",
-                    {"query": seed_query, "max_results": 30},
+                    seed_arguments,
                 )
 
                 if seed_result.is_error:
@@ -4657,12 +4925,7 @@ Finish when sufficient verified evidence is collected or the exact search is exh
             return prune_mcp_evidence(evidence, question, seed_queries)
 
         planner_failures = 0
-        # The previous seven LLM-planner rounds made ordinary questions slow
-        # and also increased the chance that a weak planner wandered into a
-        # neighbouring feature.  Bootstrap reads are deterministic and already
-        # provide the strongest evidence; use only a small number of follow-up
-        # rounds to trace an exact identifier across layers.
-        for _ in range(3):
+        for _ in range(18):
             try:
                 response = await asyncio.to_thread(
                     client.models.generate_content,
@@ -4756,21 +5019,42 @@ Finish when sufficient verified evidence is collected or the exact search is exh
                 "trace_call_chain",
             }
             if tool not in allowed_tools:
-                raise ValueError("Unsupported MCP tool")
+                transcript.append({
+                    "status": "planner_request_rejected",
+                    "message": "Unsupported MCP tool requested by planner.",
+                    "tool": tool,
+                })
+                continue
 
             if not isinstance(arguments, dict):
-                raise ValueError("Invalid MCP tool arguments")
+                transcript.append({
+                    "status": "planner_request_rejected",
+                    "message": "Planner arguments must be a JSON object.",
+                    "tool": tool,
+                })
+                continue
 
             if tool == "search_code":
                 query = str(arguments.get("query", "")).strip()
                 if len(query) < 3:
-                    raise ValueError("MCP search term is too short")
+                    transcript.append({
+                        "status": "planner_request_rejected",
+                        "tool": "search_code",
+                        "message": "MCP search term is too short.",
+                        "query": query,
+                    })
+                    continue
                 arguments = {"query": query, "max_results": 30}
 
             elif tool == "find_mock_order":
                 order_no = str(arguments.get("order_no", "")).strip()
                 if not order_no:
-                    raise ValueError("Mock order number is required")
+                    transcript.append({
+                        "status": "planner_request_rejected",
+                        "tool": "find_mock_order",
+                        "message": "Mock order number is required.",
+                    })
+                    continue
                 arguments = {"order_no": order_no}
 
             elif tool == "search_mock_orders":
@@ -4814,19 +5098,34 @@ Finish when sufficient verified evidence is collected or the exact search is exh
             elif tool == "find_symbol":
                 symbol_name = str(arguments.get("symbol_name", "")).strip()
                 if not symbol_name:
-                    raise ValueError("Symbol name is required")
+                    transcript.append({
+                        "status": "planner_request_rejected",
+                        "tool": "find_symbol",
+                        "message": "Symbol name is required.",
+                    })
+                    continue
                 arguments = {"symbol_name": symbol_name}
 
             elif tool == "find_references":
                 symbol_name = str(arguments.get("symbol_name", "")).strip()
                 if not symbol_name:
-                    raise ValueError("Symbol name is required")
+                    transcript.append({
+                        "status": "planner_request_rejected",
+                        "tool": "find_references",
+                        "message": "Symbol name is required.",
+                    })
+                    continue
                 arguments = {"symbol_name": symbol_name}
 
             elif tool == "trace_call_chain":
                 entry_symbol = str(arguments.get("entry_symbol", "")).strip()
                 if not entry_symbol:
-                    raise ValueError("Entry symbol is required")
+                    transcript.append({
+                        "status": "planner_request_rejected",
+                        "tool": "trace_call_chain",
+                        "message": "Entry symbol is required.",
+                    })
+                    continue
                 arguments = {"entry_symbol": entry_symbol}
 
             elif tool == "read_file":
@@ -4858,8 +5157,17 @@ Finish when sufficient verified evidence is collected or the exact search is exh
                     })
                     continue
 
-                start_line = max(1, int(arguments.get("start_line", 1)))
-                end_line = int(arguments.get("end_line", start_line + 119))
+                try:
+                    start_line = max(1, int(arguments.get("start_line", 1)))
+                    end_line = int(arguments.get("end_line", start_line + 119))
+                except (TypeError, ValueError):
+                    transcript.append({
+                        "status": "planner_request_rejected",
+                        "tool": "read_file",
+                        "message": "start_line/end_line must be integers.",
+                    })
+                    continue
+
                 arguments = {
                     "file_path": path,
                     "start_line": start_line,
@@ -5541,26 +5849,28 @@ def build_verified_evidence_gap_answer(question):
     if response_language == "Roman Urdu":
         return (
             "### Practical Scenario Guide\n"
-            "Requested Shipra feature ka exact verified usage flow available "
-            "source code se confirm nahi ho saka. Main related-looking files ko "
-            "actual workflow ka hissa assume nahi kar raha.\n\n"
+            "Requested Shipra operation ka exact end-to-end flow searched project "
+            "evidence se verify nahi ho saka. Is ka matlab yeh nahi ke feature "
+            "project mein exist nahi karta; sirf requested operation ki complete "
+            "connected evidence verify nahi hui.\n\n"
             "### Actual Project Code Flow\n"
-            "MCP exact-code verification requested entity aur operation ke liye "
-            "sufficient connected evidence collect nahi kar saki. Is liye "
-            "unsupported screen steps, API calls, controllers, handlers, ya "
-            "database behavior invent nahi kiya gaya."
+            "Jo layers MCP se verify hui hain unhein evidence ke sath dikhaya jayega. "
+            "Jo specific layer ya operation verify nahi hui, sirf usi ko unverified "
+            "mark kiya jayega; related query/export/read code ko create/update/delete "
+            "operation ka proof ya absence proof assume nahi kiya jayega."
         )
 
     return (
         "### Practical Scenario Guide\n"
-        "The exact usage flow for the requested Shipra feature could not be "
-        "verified from the available source code. Related-looking files are not "
-        "being treated as part of the workflow without a proven connection.\n\n"
+        "The requested Shipra operation could not be verified end-to-end from the "
+        "searched project evidence. This does not establish that the feature is "
+        "absent; it only means complete connected evidence for the requested "
+        "operation was not verified.\n\n"
         "### Actual Project Code Flow\n"
-        "MCP exact-code verification did not collect sufficient connected "
-        "evidence for the requested entity and operation. Unsupported screen "
-        "steps, API calls, controllers, handlers, or database behavior are "
-        "therefore not being invented."
+        "Verified layers should still be shown with their evidence. Only the "
+        "specific unverified layer or operation should be marked unverified; "
+        "related query/export/read code must not be treated as proof of a mutation "
+        "or as proof that the mutation does not exist."
     )
 
 
@@ -6010,18 +6320,40 @@ def build_verified_mcp_fallback_answer(question, mcp_results):
 
     # ---- Inventory ----
     elif "inventory" in q:
-        if has("inventorysale", "product inventory"):
+        inventory_sales_question = bool(
+            re.search(r"\binventory\s+sales?\b|\bsales?\s+inventory\b", q)
+        )
+
+        if inventory_sales_question:
+            if has("inventorysale") and has("shipra.frontend", "/pages/"):
+                steps.append("Open the verified Shipra frontend area for **Inventory Sales**.")
+            if has("createinventorysale", "addinventorysale", "saveinventorysale", "postinventorysale"):
+                steps.append("Use the verified Inventory Sales creation action shown in the source evidence.")
+            if has("inventorysale") and not has(
+                "createinventorysale", "addinventorysale", "saveinventorysale", "postinventorysale"
+            ):
+                steps.append(
+                    "Inventory Sales-related code was verified, but the displayed evidence does not "
+                    "verify the requested create action; no create steps are inferred from query/export code."
+                )
+            expected = (
+                "Only the Inventory Sales creation behavior directly verified by the retrieved "
+                "frontend/backend evidence is confirmed."
+            )
+        elif has("inventorysale", "product inventory"):
             steps.append("Open the relevant **Product Inventory** screen in Shipra.")
-        if has("editinventorymodal", "updateproductstockquantitybyreason"):
+
+        if not inventory_sales_question and has("editinventorymodal", "updateproductstockquantitybyreason"):
             steps.append("Select the inventory item whose stock quantity you want to update and open the inventory edit action.")
             if has('name: "reason"', "transactiontypeid"):
                 steps.append("Select the applicable stock adjustment reason.")
             if has('name: "quantity"', "quantity: parsefloat"):
                 steps.append("Enter the quantity to adjust and add a comment if required.")
             steps.append("Submit the stock update and verify the refreshed inventory quantity.")
-        if has("syncinventorymodal", "salechannelinventorysync"):
+        if not inventory_sales_question and has("syncinventorymodal", "salechannelinventorysync"):
             steps.append("If inventory synchronization is required, choose the sale channel/configuration and run the inventory sync.")
-        expected = "The selected inventory operation is completed and the inventory view is refreshed with the verified result."
+        if not inventory_sales_question:
+            expected = "The selected inventory operation is completed and the inventory view is refreshed with the verified result."
 
     # Generic evidence-based fallback: do NOT pretend generic actions are exact.
     if not steps:
@@ -7009,6 +7341,45 @@ def ask_shipra_project_ai(question, intent):
             "I won't infer the count from source-code snippets."
         ), []
 
+    # SINGLE-ORDER DATA LOOKUP FAST PATH.
+    if (
+        hybrid_route.get("intent") == "data_query"
+        and hybrid_route.get("action") == "lookup"
+        and str(hybrid_route.get("entity") or "").lower() in {"order", "orders"}
+    ):
+        resolved_order_no = resolve_context_order_number(question, conversation_text)
+        if not resolved_order_no:
+            if response_language == "Roman Urdu":
+                return ("Kis order ki baat ho rahi hai? Order number (misal: `ORD-1001`) bhej dein taa ke exact verified date/time check ki ja sake."), []
+            return ("Which order do you mean? Send the order number (for example `ORD-1001`) so I can check its exact verified delivery date/time."), []
+
+        lookup_question = (
+            f"{resolved_order_no} exact delivery date and time; "
+            "find this exact order in verified runtime/mock order data"
+        )
+        try:
+            detail_results = asyncio.run(
+                collect_mcp_evidence(lookup_question, conversation_text, [])
+            )
+        except Exception:
+            detail_results = []
+
+        mock_detail_results = [
+            item for item in detail_results if item.get("source_type") == "mock_data"
+        ]
+        if mock_detail_results:
+            return build_order_delivery_time_answer(
+                question, mock_detail_results, response_language, resolved_order_no
+            ), mock_detail_results
+
+        if response_language == "Roman Urdu":
+            return (
+                f"**{resolved_order_no}** ka exact delivery date/time verified runtime data se retrieve nahi ho saka. Main source code ya status dekh kar timestamp guess nahi karunga."
+            ), []
+        return (
+            f"I couldn't retrieve the exact delivery date/time for **{resolved_order_no}** from verified runtime data. I won't infer a timestamp from source code or status."
+        ), []
+
     # AUTHORITATIVE DATA-ROUTE GUARD:
     # A business-data question must never drift into code/workflow retrieval.
     if route_requires_runtime_data(hybrid_route):
@@ -7045,54 +7416,48 @@ def ask_shipra_project_ai(question, intent):
 
 
     # ------------------------------------------------------------------
-    # RAG-FIRST DISCOVERY -> MCP VERIFICATION
+    # MCP-FIRST RETRIEVAL
     # ------------------------------------------------------------------
-    # FAISS is best at translating a user's natural-language wording into the
-    # real file/function names in the 4,768 indexed Shipra code chunks.  MCP
-    # then searches and reads those candidates from the currently deployed
-    # raw source.  RAG is therefore a discovery layer, never final evidence.
-    rag_candidates = []
-    try:
-        rag_started = time.time()
-        raw_rag_candidates = search_documentation(search_question, top_k=16)
-        filtered_rag_candidates = filter_relevant_results(
-            raw_rag_candidates,
-            search_question,
-        )
-        # Do not let a strict lexical filter erase all semantic leads.
-        rag_candidates = filtered_rag_candidates or raw_rag_candidates
-        print(
-            f"RAG DISCOVERY: {len(rag_candidates)} candidates in "
-            f"{time.time() - rag_started:.2f} sec"
-        )
-    except Exception as rag_error:
-        print(f"RAG DISCOVERY FAILED: {type(rag_error).__name__}: {rag_error}")
-
+    # First attempt exact live-code discovery with no semantic/index hints.
+    # RAG is used only as a discovery fallback, and its snippets are never
+    # passed to the final answer unless MCP independently reads/verifies them.
     mcp_results = []
     primary_mcp_error = None
+
     try:
         mcp_started = time.time()
         mcp_results = asyncio.run(
             collect_mcp_evidence(
                 question,
                 conversation_text,
-                rag_candidates,
+                [],
             )
         )
-        print(
-            f"MCP VERIFICATION: {len(mcp_results)} verified sections in "
-            f"{time.time() - mcp_started:.2f} sec"
-        )
+        print(f"MCP PRIMARY TOTAL: {time.time() - mcp_started:.2f} sec")
     except Exception as error:
         primary_mcp_error = error
 
-    # If the index is missing/stale and produced no candidates, retain a raw
-    # MCP-only fallback.  This keeps the assistant usable while preserving the
-    # normal RAG-first retrieval order.
-    if not rag_candidates and not mcp_results:
+    rag_candidates = []
+
+    if not mcp_results:
+        # MCP exact discovery did not find enough evidence. Use RAG only to
+        # suggest candidate identifiers/paths, then ask MCP to verify them.
+        rag_candidates = search_documentation(
+            search_question,
+            top_k=8,
+        )
+        rag_candidates = filter_relevant_results(
+            rag_candidates,
+            search_question,
+        )
+
         try:
             mcp_results = asyncio.run(
-                collect_mcp_evidence(question, conversation_text, [])
+                collect_mcp_evidence(
+                    question,
+                    conversation_text,
+                    rag_candidates,
+                )
             )
         except Exception as fallback_error:
             if primary_mcp_error is None:
@@ -7228,9 +7593,7 @@ def ask_shipra_project_ai(question, intent):
 
     # SPEED: keep full verified MCP results for code injection/fallback, but limit
     # only the text sent to Groq. This reduces prompt/token processing latency.
-    # Keep the final answer grounded but leave room for the model to reason.
-    # A very large mixed context was a common reason for vague answers.
-    MAX_GROQ_CONTEXT_CHARS = 12000
+    MAX_GROQ_CONTEXT_CHARS = 16000
     if len(context) > MAX_GROQ_CONTEXT_CHARS:
         context = context[:MAX_GROQ_CONTEXT_CHARS]
         print(
@@ -7305,21 +7668,12 @@ Conversation context (may be empty):
 If request type is project_change, do not claim the requested new feature
 already exists merely because similar project code was retrieved. Existing code
 is only a reference unless it directly implements the requested feature.
-For a project_change request, never describe a page, list, refresh, API call,
-or success outcome as an existing Shipra behaviour unless the supplied excerpt
-directly verifies it.  Label every new step and every new code block as
-proposed.  An import by itself is only a reusable visual reference; it does not
-prove a control is rendered or that any delete operation exists.
-When the exact target component and its matching API/backend flow were NOT
-retrieved, do not fabricate Shipra file paths, folders, imports, Redux hooks,
-toast helpers, HTTP clients, endpoints, controller base classes, dispatchers,
-commands, repositories, or entity property names.  Do not call such code
-"end-to-end" or "minimal".  Instead state that an exact Shipra patch cannot
-be generated from the available evidence and give only a short implementation
-checklist of the source files that must be retrieved first.  Generic example
-code is allowed only if clearly headed "Generic example — not verified Shipra
-code", uses placeholders such as <station-id>, and makes no Shipra-specific
-claim.
+For project_change, retrieval should verify the TARGET AREA and its extension
+points (page/component, local event pattern, frontend API helper when needed,
+backend endpoint/command/handler/repository when needed). The newly requested
+button/field/modal/etc. is allowed to be absent because the user is asking to
+add it. Do not reject the request merely because no existing implementation of
+that new artifact is found.
 
 Answer directly. Do not output CLARIFICATION or ask the user to choose
 components or implementation details. State a reasonable assumption if needed.
@@ -7525,10 +7879,12 @@ is project_change:
 - Provide a Proposed implementation for the requested change.
 - Include suggested placement, imports, integration steps, and a simple test.
 - Clearly label unverified imports, dependencies, and sample data.
-- If the exact target UI file plus its project API convention were not
-  retrieved, replace the Proposed implementation with a `#### Required source
-  evidence` checklist. Do not invent placement, imports, endpoints, or backend
-  types merely to fill this section.
+- Match implementation depth to the requested behavior. A purely local UI button
+  does not require a new backend API. If the button must persist data or trigger
+  business behavior, trace and propose only the backend layers actually needed.
+- For "full flow with code", show the verified existing extension point first,
+  then a coherent proposed frontend-to-backend flow only where the requested
+  behavior requires those layers.
 
 If the user asks how to USE an existing feature and evidence is incomplete:
 - Do NOT add a Proposed implementation.
@@ -7970,60 +8326,8 @@ for conversation in list_conversations():
 
 
 def render_message_copy_button(content, key, align="left"):
-    import streamlit.components.v1 as components
-    import json
-
-    text_value = str(content or "")
-    text_json = json.dumps(text_value)
-
-    components.html(
-        f"""
-        <div style="
-            display:flex;
-            justify-content:{'flex-end' if align == 'right' else 'flex-start'};
-            margin:0;
-            padding:0;
-            height:30px;
-        ">
-            <button
-                id="copy-btn"
-                title="Copy"
-                onclick='copyText()'
-                style="
-                    background:transparent;
-                    border:none;
-                    color:#aeb2b8;
-                    cursor:pointer;
-                    padding:3px 5px;
-                    margin:0;
-                    border-radius:6px;
-                    font-size:18px;
-                    line-height:20px;
-                "
-                onmouseover="this.style.background='rgba(255,255,255,0.08)'; this.style.color='#ffffff';"
-                onmouseout="this.style.background='transparent'; this.style.color='#aeb2b8';"
-            >
-                ⧉
-            </button>
-        </div>
-
-        <script>
-            function copyText() {{
-                navigator.clipboard.writeText({text_json}).then(() => {{
-                    const btn = document.getElementById("copy-btn");
-                    btn.innerHTML = "✓";
-                    btn.title = "Copied";
-
-                    setTimeout(() => {{
-                        btn.innerHTML = "⧉";
-                        btn.title = "Copy";
-                    }}, 1200);
-                }});
-            }}
-        </script>
-        """,
-        height=30,
-    )
+    """Keep chat rendering iframe-free; use the chat UI's native copy affordance."""
+    return None
 
 
 # Render the selected conversation above the sticky composer.
@@ -8057,7 +8361,6 @@ for message_index, message in enumerate(st.session_state["chat_history"]):
             render_message_copy_button(
                 message["content"],
                 f"history_assistant_{message_index}",
-                align="left",
             )
 
 
@@ -8156,3 +8459,4 @@ if question:
 
     # Rerun so the sidebar title/order and the full transcript refresh cleanly.
     st.rerun()
+
