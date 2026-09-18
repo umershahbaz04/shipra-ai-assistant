@@ -1,5 +1,5 @@
 import os
-SHIPRA_ROUTER_VERSION = "v14-universal-fast-problem-solver"
+SHIPRA_ROUTER_VERSION = "v15-universal-runtime-router"
 import sys
 import json
 import math
@@ -3132,8 +3132,12 @@ def is_data_aggregate_question(question):
         "product", "products", "inventory", "inventories", "customer", "customers",
         "invoice", "invoices", "payment", "payments", "parcel", "parcels",
         "sale", "sales", "delivery", "deliveries", "stock", "stocks",
+        "store", "stores", "warehouse", "warehouses", "vendor", "vendors",
+        "supplier", "suppliers", "employee", "employees", "user", "users",
+        "category", "categories", "channel", "channels", "purchase", "purchases",
         " آرڈر", " آرڈرز", " ریٹرن", " شپمنٹ", " پروڈکٹ", " انوینٹری",
-        " کسٹمر", " انوائس", " پیمنٹ", " پارسل", " سیل",
+        " کسٹمر", " انوائس", " پیمنٹ", " پارسل", " سیل", " اسٹور", " سٹور",
+        " ویئرہاؤس", " وینڈر", " سپلائر", " ملازم", " یوزر",
     )
     status_signals = (
         "delivered", "deliver", "delivery", "deliverd", "delivred",
@@ -3182,6 +3186,15 @@ def get_data_query_contract(question):
         "invoices": ("invoice", "invoices", " انوائس"),
         "payments": ("payment", "payments", " پیمنٹ"),
         "sales": ("sale", "sales", " سیل"),
+        "stores": ("store", "stores", "shop", "shops", " اسٹور", " سٹور"),
+        "warehouses": ("warehouse", "warehouses", " ویئرہاؤس"),
+        "vendors": ("vendor", "vendors", " وینڈر"),
+        "suppliers": ("supplier", "suppliers", " سپلائر"),
+        "employees": ("employee", "employees", " staff", " ملازم"),
+        "users": ("user", "users", " یوزر"),
+        "categories": ("category", "categories"),
+        "channels": ("channel", "channels"),
+        "purchases": ("purchase", "purchases"),
     }
     status_aliases = {
         "delivered": ("delivered", "deliverd", "delivred", "deliver ho", "deliver hog", "deliver hu", "ڈیلیور"),
@@ -3284,7 +3297,7 @@ Return JSON ONLY:
 
 Rules:
 - Asking where code/config/class/function/service is located => codebase_location.
-- Asking count/total/how many of business records, optionally by status => data_query.
+- Asking count/total/how many of Shipra business records (orders, stores, products, customers, returns, shipments, inventory, or another business entity), optionally by status => data_query.
 - Asking for a factual field/value of a specific business record (for example an order exact delivery date/time, tracking number, carrier, payment value, or status history) => data_query with action lookup.
 - Understand outcome paraphrases semantically: e.g. "customer ko pohanchne wale orders" means delivered orders; do not require the literal word delivered.
 - Asking which layers/files/steps are needed to add/build a feature => architecture_guidance.
@@ -3419,6 +3432,189 @@ def route_requires_project_evidence(route):
         "codebase_location", "architecture_guidance",
         "project_workflow", "code_explanation", "debugging",
     }
+
+
+
+def _safe_runtime_tool_name(name):
+    """Allow only obviously read-only runtime/data tools."""
+    n = str(name or "").casefold()
+    blocked = (
+        "create", "update", "delete", "remove", "save", "write", "post",
+        "put", "patch", "assign", "sync", "upload", "execute_sql",
+    )
+    if any(word in n for word in blocked):
+        return False
+    allowed = (
+        "count", "get_count", "record_count", "query_data", "query_records",
+        "search_data", "search_records", "runtime_data", "business_data",
+        "list_stores", "list_orders", "list_products", "list_customers",
+    )
+    return any(word in n for word in allowed)
+
+
+def _tool_schema_properties(tool):
+    schema = (
+        getattr(tool, "inputSchema", None)
+        or getattr(tool, "input_schema", None)
+        or {}
+    )
+    if hasattr(schema, "model_dump"):
+        schema = schema.model_dump()
+    return (schema or {}).get("properties", {}) if isinstance(schema, dict) else {}
+
+
+def _build_runtime_tool_arguments(tool, entity, status=None):
+    """Map our neutral entity/status contract onto a discovered read-only tool."""
+    props = _tool_schema_properties(tool)
+    args = {}
+    aliases = {
+        "entity": entity, "entity_name": entity, "resource": entity,
+        "resource_name": entity, "table": entity, "record_type": entity,
+        "collection": entity, "model": entity,
+        "status": status, "state": status,
+    }
+    for key, value in aliases.items():
+        if key in props and value not in (None, ""):
+            args[key] = value
+
+    # Entity-specific tools such as count_stores normally need no entity arg.
+    name = str(getattr(tool, "name", "") or "").casefold()
+    singular = str(entity or "").rstrip("s").casefold()
+    entity_named_tool = singular and singular in name
+
+    required = []
+    schema = (
+        getattr(tool, "inputSchema", None)
+        or getattr(tool, "input_schema", None)
+        or {}
+    )
+    if hasattr(schema, "model_dump"):
+        schema = schema.model_dump()
+    if isinstance(schema, dict):
+        required = schema.get("required") or []
+
+    if entity_named_tool:
+        # Do not inject an unnecessary generic entity into a dedicated tool.
+        for key in ("entity", "entity_name", "resource", "resource_name",
+                    "table", "record_type", "collection", "model"):
+            args.pop(key, None)
+
+    # We only auto-call tools whose required arguments we can safely satisfy.
+    if any(key not in args for key in required):
+        return None
+    return args
+
+
+def _extract_runtime_count(payload, entity=None):
+    """Conservatively extract a count from structured read-only tool output."""
+    if payload is None:
+        return None
+    if isinstance(payload, bool):
+        return None
+    if isinstance(payload, int):
+        return payload
+    if isinstance(payload, float) and payload.is_integer():
+        return int(payload)
+    if isinstance(payload, list):
+        return len(payload)
+    if not isinstance(payload, dict):
+        return None
+
+    for key in ("count", "total", "total_count", "totalCount", "record_count",
+                "recordCount", "numberOfRecords", "number_of_records"):
+        value = payload.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.strip().isdigit():
+            return int(value.strip())
+
+    # A dedicated collection payload is also valid evidence.
+    candidate_keys = []
+    if entity:
+        candidate_keys.extend([entity, str(entity).rstrip("s")])
+    candidate_keys.extend(("records", "items", "data", "results"))
+    for key in candidate_keys:
+        value = payload.get(key)
+        if isinstance(value, list):
+            return len(value)
+    return None
+
+
+async def get_verified_runtime_count(entity, status=None):
+    """
+    Discover and invoke an MCP read-only count/data tool if the connected server
+    exposes one. Source-code search tools are intentionally ignored.
+    """
+    if not entity:
+        return None
+
+    params = get_mcp_server_params()
+    async with Client(params) as mcp_client:
+        tools = await mcp_client.list_tools()
+        if hasattr(tools, "tools"):
+            tools = tools.tools
+        tools = list(tools or [])
+
+        singular = str(entity).rstrip("s").casefold()
+
+        def score(tool):
+            name = str(getattr(tool, "name", "") or "").casefold()
+            points = 0
+            if not _safe_runtime_tool_name(name):
+                return -1000
+            if "count" in name:
+                points += 50
+            if singular and singular in name:
+                points += 40
+            if any(x in name for x in ("runtime", "business", "record", "data")):
+                points += 10
+            return points
+
+        candidates = sorted(tools, key=score, reverse=True)
+        for tool in candidates:
+            if score(tool) < 0:
+                continue
+            args = _build_runtime_tool_arguments(tool, entity, status)
+            if args is None:
+                continue
+            try:
+                result = await mcp_client.call_tool(tool.name, args)
+            except Exception:
+                continue
+            if getattr(result, "is_error", False):
+                continue
+
+            payload = getattr(result, "structured_content", None)
+            if payload is None:
+                raw = "\n".join(
+                    block.text for block in getattr(result, "content", [])
+                    if getattr(block, "type", "") == "text"
+                ).strip()
+                if raw:
+                    try:
+                        payload = json.loads(raw)
+                    except Exception:
+                        payload = parse_json_object(raw)
+
+            count = _extract_runtime_count(payload, entity)
+            if count is not None:
+                return {
+                    "count": count,
+                    "entity": entity,
+                    "status": status,
+                    "tool": str(getattr(tool, "name", "")),
+                }
+    return None
+
+
+def build_runtime_count_answer(result, response_language):
+    count = result["count"]
+    entity = str(result.get("entity") or "records")
+    status = result.get("status")
+    target = f"{status} {entity}".strip() if status else entity
+    if response_language == "Roman Urdu":
+        return f"Shipra ke verified runtime data ke mutabiq **{target} ki tadaad {count} hai**."
+    return f"According to Shipra's verified runtime data, there are **{count} {target}**."
 
 
 def route_requires_runtime_data(route):
@@ -5089,10 +5285,10 @@ def answer_from_mock_data(question, results, response_language):
     if response_language == "Roman Urdu":
         if not selected:
             return (
-                "### Practical Scenario Guide\n"
+                "### Verified Data\n"
                 "Verified mock data check ki gayi, lekin requested filters ke "
                 "mutabiq koi matching order nahi mila.\n\n"
-                "### Actual Project Code Flow\n"
+                "### Data Source\n"
                 "Ye code-flow question nahi hai; result verified mock data se "
                 "directly nikala gaya hai."
             )
@@ -5116,10 +5312,10 @@ def answer_from_mock_data(question, results, response_language):
     else:
         if not selected:
             return (
-                "### Practical Scenario Guide\n"
+                "### Verified Data\n"
                 "The verified mock data was checked, but no order matched "
                 "the requested filters.\n\n"
-                "### Actual Project Code Flow\n"
+                "### Data Source\n"
                 "This is a data lookup rather than a code-flow question; "
                 "the result comes directly from verified mock data."
             )
@@ -5184,10 +5380,10 @@ def answer_from_mock_data(question, results, response_language):
         )
 
     return (
-        "### Practical Scenario Guide\n"
+        "### Verified Data\n"
         f"{intro}\n\n"
         + "\n".join(lines)
-        + "\n\n### Actual Project Code Flow\n"
+        + "\n\n### Data Source\n"
         + code_note
     )
 
@@ -6771,6 +6967,32 @@ def ask_shipra_project_ai(question, intent):
 
     request_profile = detect_request_profile(question)
 
+    # UNIVERSAL DATA QUERY FAST PATH:
+    # Count any recognized Shipra business entity from a connected read-only
+    # runtime MCP data tool. Never search source code to manufacture a live count.
+    if (
+        hybrid_route.get("intent") == "data_query"
+        and hybrid_route.get("action") == "count"
+    ):
+        data_entity = hybrid_route.get("entity")
+        data_status = hybrid_route.get("status")
+        if not data_entity or data_entity == question:
+            contract = get_data_query_contract(question)
+            data_entity = contract.get("entity")
+            data_status = data_status or contract.get("status")
+
+        try:
+            runtime_count = asyncio.run(
+                get_verified_runtime_count(data_entity, data_status)
+            )
+        except Exception:
+            runtime_count = None
+
+        if runtime_count is not None:
+            return build_runtime_count_answer(
+                runtime_count, response_language
+            ), []
+
     # DATA QUERY FAST PATH: count/status questions must use structured MCP data
     # before source-code retrieval. This prevents "pending" from drifting into
     # unrelated COD-pending handlers or other semantic source matches.
@@ -6782,7 +7004,10 @@ def ask_shipra_project_ai(question, intent):
     ):
         order_count_status = hybrid_route.get("status")
 
-    if order_count_status:
+    if (
+        order_count_status
+        and str(hybrid_route.get("entity") or "").lower() in {"order", "orders"}
+    ):
         try:
             status_result = asyncio.run(
                 get_verified_order_status_count(order_count_status)
@@ -6850,14 +7075,19 @@ def ask_shipra_project_ai(question, intent):
     # AUTHORITATIVE DATA-ROUTE GUARD:
     # A business-data question must never drift into code/workflow retrieval.
     if route_requires_runtime_data(hybrid_route):
+        target = str(hybrid_route.get("entity") or "requested business data")
+        status = hybrid_route.get("status")
+        if status:
+            target = f"{status} {target}"
         if response_language == "Roman Urdu":
             return (
-                "Is sawal ka exact jawab current connected runtime/database evidence se "
-                "verify nahi ho saka. Main source code se business data guess nahi karunga."
+                f"**{target}** ka exact jawab connected read-only runtime/database "
+                "source se verify nahi ho saka. Source code se live business data "
+                "guess nahi kiya jayega."
             ), []
         return (
-            "The exact answer could not be verified from the currently connected "
-            "runtime/database evidence. I won't infer business data from source code."
+            f"The exact value for **{target}** could not be verified from a connected "
+            "read-only runtime/database source. It will not be inferred from source code."
         ), []
 
     # Validate raw source availability before code-flow retrieval. Mock-data
