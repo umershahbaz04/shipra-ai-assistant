@@ -1,5 +1,5 @@
 import os
-SHIPRA_ROUTER_VERSION = "v13-order-detail-data-fixed"
+SHIPRA_ROUTER_VERSION = "v14-universal-fast-problem-solver"
 import sys
 import json
 import math
@@ -1142,6 +1142,10 @@ GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 # Groq model configuration
 PRIMARY_MODEL = "openai/gpt-oss-20b"
 FALLBACK_MODEL = "llama-3.1-8b-instant"
+
+MCP_PLANNER_MAX_TURNS = 8
+MCP_PLANNER_MAX_FAILURES = 1
+MAX_GENERAL_HISTORY_CHARS = 5000
 
 
 class _GroqTextResponse:
@@ -2946,6 +2950,52 @@ def normalize_business_status_semantically(question):
     return None
 
 
+
+def is_debugging_question(question):
+    q=_normalize_intent_text(question)
+    signals=(
+        "fix this error","fix error","fix this bug","fix bug","debug","traceback",
+        "exception","stack trace","compile error","build error","runtime error",
+        "syntax error","typeerror","nullreferenceexception","null reference",
+        "500 error","400 error","401 error","403 error","404 error",
+        "api failing","api failed","request failed","not working","doesn't work",
+        "does not work","isn't working","crash","crashing","failing","why failing",
+        "why is this failing","data not saving","not saving","not loading",
+        "response empty","wrong output","unexpected result","root cause",
+        "error aa","error ar","bug aa","bug fix","issue aa","kam nahi kar",
+        "kaam nahi kar","work nahi kar","save nahi ho","load nahi ho",
+        "response nahi","crash ho","fail ho","kyun fail","q fail",
+        "خرابی","ایرر","بگ","کام نہیں","فیل","کریش")
+    shaped=bool(re.search(
+        r"\b(?:error|exception|failed|failure|failing|traceback)\b|"
+        r"\b[A-Za-z_][A-Za-z0-9_.]*(?:Exception|Error)\b",
+        str(question or ""),flags=re.IGNORECASE))
+    return any(s in q for s in signals) or shaped
+
+def has_explicit_project_context(question, conversation_text=""):
+    combined=_normalize_intent_text(f"{conversation_text or ''}\n{question or ''}")
+    signals=("shipra","production station","sale channel","store channel",
+        "shipra.backend","shipra.frontend","createproductcommand","commandhandler",
+        "repository","controller","servicecollectionextensions","mcp","our project",
+        "my project","mera project","hamara project","is project","project mai",
+        "project mein","codebase")
+    named=bool(re.search(
+        r"\b[A-Za-z0-9_.-]+\.(?:cs|js|jsx|ts|tsx|py|json|sql|css|scss|html)\b",
+        str(question or ""),flags=re.IGNORECASE))
+    return named or any(s in combined for s in signals)
+
+def is_clear_general_question(question):
+    q=_normalize_intent_text(question)
+    if not q or has_explicit_project_context(question): return False
+    if is_data_aggregate_question(question) or is_order_detail_data_question(question): return False
+    starters=("what is ","what are ","who is ","who was ","why is ","why does ",
+        "explain ","define ","difference between ","compare ","translate ","write ",
+        "rewrite ","summarize ","how does ","how do i ","how to ",
+        "can you explain ","tell me about ")
+    tech=("python","javascript","typescript","react","sql","html","css","c#",".net",
+          "java","docker","git","github","rest api","algorithm","programming")
+    return q.startswith(starters) or any(x in q for x in tech)
+
 def is_order_detail_data_question(question):
     q = _normalize_intent_text(question)
     order_context = bool(re.search(r"\b(?:order|this order|that order|it)\b", q))
@@ -3225,7 +3275,7 @@ Understand English, Urdu, Roman Urdu, mixed language, typos, paraphrases, and in
 
 Return JSON ONLY:
 {{
-  "intent": "codebase_location|data_query|architecture_guidance|project_workflow|code_explanation|general",
+  "intent": "codebase_location|data_query|architecture_guidance|project_workflow|code_explanation|debugging|general",
   "action": "locate|count|lookup|explain|guide|workflow|general",
   "entity": "short subject or null",
   "status": "status/filter or null",
@@ -3240,6 +3290,7 @@ Rules:
 - Asking which layers/files/steps are needed to add/build a feature => architecture_guidance.
 - Asking how an existing Shipra feature/process works or is performed => project_workflow.
 - Asking why/what a specific code/file/function does => code_explanation.
+- Asking to diagnose/fix an error, exception, failed API, crash, wrong output, or broken code => debugging.
 - Never invent project facts, file paths, database values, or counts.
 - Route by the user's intended meaning, not literal keywords.
 - A request for current/business values must use data_query even when the status is paraphrased.
@@ -3267,7 +3318,7 @@ User question:
 
     allowed = {
         "codebase_location", "data_query", "architecture_guidance",
-        "project_workflow", "code_explanation", "general"
+        "project_workflow", "code_explanation", "debugging", "general"
     }
     intent = str(obj.get("intent") or "").strip().lower()
     if intent not in allowed:
@@ -3307,6 +3358,12 @@ def get_hybrid_route(question):
         return {"intent": "architecture_guidance", "action": "guide",
                 "entity": raw, "status": None,
                 "confidence": 1.0, "source": "fast_path"}
+    if is_debugging_question(raw):
+        return {"intent":"debugging","action":"debug","entity":raw,"status":None,
+                "confidence":1.0,"source":"fast_path"}
+    if is_clear_general_question(raw):
+        return {"intent":"general","action":"general","entity":raw,"status":None,
+                "confidence":1.0,"source":"fast_general"}
 
     semantic = semantic_route_with_groq(raw)
     if semantic and semantic.get("confidence", 0) >= 0.68:
@@ -3360,7 +3417,7 @@ def resolve_authoritative_route(question):
 def route_requires_project_evidence(route):
     return str((route or {}).get("intent")) in {
         "codebase_location", "architecture_guidance",
-        "project_workflow", "code_explanation",
+        "project_workflow", "code_explanation", "debugging",
     }
 
 
@@ -3395,6 +3452,12 @@ def detect_request_profile(question):
             "entity": contract.get("entity") or raw,
             "status": contract.get("status"),
         }
+
+    if is_debugging_question(raw):
+        recent_context=get_recent_history_text(limit=4)
+        if has_explicit_project_context(raw,recent_context):
+            return {"scope":"project","mode":PROJECT_CHANGE,"action":"debug","entity":raw}
+        return {"scope":"general","mode":GENERAL,"action":"debug","entity":raw}
 
     # Exact codebase-location lookup: "DI kahan hai?", "where is JWT configured?", etc.
     if is_codebase_location_question(raw):
@@ -3555,12 +3618,12 @@ def detect_request_profile(question):
     )
 
     if explicit_code_change:
-        return {
-            "scope": "project",
-            "mode": PROJECT_CHANGE,
-            "action": action or "change",
-            "entity": entity,
-        }
+        recent_context=get_recent_history_text(limit=4)
+        if explicit_shipra or has_explicit_project_context(raw,recent_context):
+            return {"scope":"project","mode":PROJECT_CHANGE,
+                    "action":action or "change","entity":entity}
+        return {"scope":"general","mode":GENERAL,
+                "action":action or "change","entity":entity}
 
     if project_scope:
         return {
@@ -3586,6 +3649,13 @@ def detect_request_profile(question):
         if semantic_intent == "code_explanation":
             return {"scope": "project", "mode": PROJECT_EXISTING, "action": "explain",
                     "entity": semantic.get("entity") or raw}
+        if semantic_intent == "debugging":
+            recent_context=get_recent_history_text(limit=4)
+            if has_explicit_project_context(raw,recent_context):
+                return {"scope":"project","mode":PROJECT_CHANGE,"action":"debug",
+                        "entity":semantic.get("entity") or raw}
+            return {"scope":"general","mode":GENERAL,"action":"debug",
+                    "entity":semantic.get("entity") or raw}
         if semantic_intent == "project_workflow":
             return {"scope": "project", "mode": PROJECT_EXISTING, "action": "workflow",
                     "entity": semantic.get("entity") or raw}
@@ -3599,110 +3669,11 @@ def detect_request_profile(question):
 
 
 def classify_question(question):
-    # Deterministic routing first. Groq is only a fallback for ambiguous text.
-    if re.search(r"\bORD-\d+\b", question, flags=re.IGNORECASE):
-        return PROJECT_EXISTING
-
-    profile = detect_request_profile(question)
-    if profile["mode"] != GENERAL:
-        return profile["mode"]
-
-    lowered_question = question.lower()
-    if (
-        ("order" in lowered_question or "orders" in lowered_question)
-        and any(term in lowered_question for term in (
-            "label", "labels", "tracking", "carrier", "cod", "vip",
-            "priority", "fulfilled", "delivered",
-        ))
-    ):
-        return PROJECT_EXISTING
-
-    history_text = get_recent_history_text(limit=4)
-
-    prompt = f"""
-Classify the latest user question into exactly ONE label:
-
-general
-- General knowledge or programming question.
-- Not specifically asking about the Shipra project.
-
-project_existing
-- Asking how an existing Shipra feature, screen, file, function, API,
-  frontend flow, backend flow, controller, handler, repository, or entity works.
-
-project_change
-- Explicitly asking to change the application's source code or build,
-  modify, or extend application functionality.
-- Creating a business record through an existing screen is project_existing,
-  not project_change. Examples: placing an order, creating an order label,
-  connecting a sale channel, or adding a customer.
-- Words such as "create", "add", and "new" alone do not imply code changes.
-- If the user asks how to perform an operation, prefer project_existing.
-project_prompt
-- User specifically asks to generate a coding prompt for the Shipra project.
-- Examples:
-  "is feature ka prompt generate karo"
-  "mujhe AI tool ke liye prompt bana do"
-  "duplicate order feature ka coding prompt do"
-
-Use conversation context to understand follow-up phrases such as
-"us mein", "uske baad", "ye add karo", or "is page par".
-A generic programming question such as "React mein API kaise call karte hain?"
-is general unless the latest question or conversation clearly connects it to Shipra.
-
-Return ONLY one of these exact labels:
-general
-project_existing
-project_change
-project_prompt
-
-Conversation:
-{history_text}
-
-Latest question:
-{question}
-"""
-
-    models_to_try = [
-        PRIMARY_MODEL,
-        FALLBACK_MODEL,
-    ]
-
-    for model_name in models_to_try:
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-            )
-            intent = (response.text or "").strip().lower()
-
-            if intent in {GENERAL, PROJECT_EXISTING, PROJECT_CHANGE, PROJECT_PROMPT}:
-                return intent
-        except Exception as error:
-            print(f"Intent classification error with {model_name}: {error}")
-
-    # Safe fallback if classification API fails.
-    combined = f"{history_text}\n{question}".lower()
-    change_words = {
-        "create", "update", "delete", "change", "modify", "replace",
-    }
-    question_tokens = tokenize(question)
-    project_hint = any(
-        word in combined
-        for word in (
-            "shipra", "frontend", "backend", "controller", "repository",
-            "handler", "axiosinterceptors", "sale channel", "project",
-            "order", "orders", "label", "labels", "mock", "tracking", "carrier",
-        )
-    )
-
-    if project_hint and question_tokens.intersection(change_words):
-        return PROJECT_CHANGE
-    if project_hint:
-        return PROJECT_EXISTING
-
+    """One authoritative routing decision; no duplicate classifier-model request."""
+    p=detect_request_profile(question); mode=p.get("mode",GENERAL)
+    if mode in {GENERAL,PROJECT_EXISTING,PROJECT_CHANGE,PROJECT_PROMPT}: return mode
+    if p.get("scope") in {"project","data"}: return PROJECT_EXISTING
     return GENERAL
-
 
 def filter_relevant_results(results, question):
     """Drop weak semantic neighbors before they reach Groq."""
@@ -3743,542 +3714,38 @@ def filter_relevant_results(results, question):
 
 
 def ask_general_ai(question):
-    response_language = get_response_language(question)
-    conversation_text = get_recent_history_text()
-
-    prompt = f"""
-You are a helpful general AI assistant.
-Required output language: {response_language}.
-
-Answer the latest question accurately and directly.
-Use numbered, step-by-step guidance whenever instructions or a process are useful.
-For conceptual questions, explain from simple to practical.
-Use examples when helpful.
-Do not mention Shipra, project files, project APIs, or project code unless the
-user explicitly asks about them.
-Do not include Markdown headings named Practical Scenario Guide or Actual Project Code Flow.
-Do not invent facts.
-
+    """Fast general/problem-solving path: no MCP and no forced Shipra headings."""
+    lang=get_response_language(question); history=get_recent_history_text()
+    if len(history)>MAX_GENERAL_HISTORY_CHARS: history=history[-MAX_GENERAL_HISTORY_CHARS:]
+    debug_rules="""
+The user is debugging code. Act as a senior problem-solving engineer:
+- identify the root cause supported by supplied code/error;
+- distinguish verified facts from hypotheses;
+- give the smallest safe fix first and corrected code when possible;
+- state exactly what context is missing if a definitive fix is impossible;
+- include concise verification/regression checks;
+- never claim execution that did not occur.
+""" if is_debugging_question(question) else ""
+    prompt=f"""You are a fast, accurate general AI assistant.
+Required output language: {lang}.
+Answer directly. Understand English, Urdu, Roman Urdu, mixed language, typos and paraphrases.
+Do not force Shipra-specific headings unless the question is actually about Shipra.
+For uncertain facts, state limitations instead of inventing.
+For programming, provide correct practical code/examples when useful.
+{debug_rules}
 Conversation context:
-{conversation_text}
-
+{history}
 Latest question:
-{question}
-"""
-
-    models_to_try = [
-        PRIMARY_MODEL,
-        FALLBACK_MODEL,
-    ]
-    last_error = None
-
-    for model_name in models_to_try:
+{question}""".strip()
+    last=None
+    for model in (PRIMARY_MODEL,FALLBACK_MODEL):
         try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-            )
-            guide = (response.text or "").strip()
-
-            if response_language == "Roman Urdu":
-                code_note = (
-                    "Ye general sawal hai, is liye Shipra project ka verified "
-                    "code is answer ke liye apply nahi hota."
-                )
-            else:
-                code_note = (
-                    "This is a general question, so verified Shipra project "
-                    "code is not applicable to this answer."
-                )
-
-            answer = (
-                "### Practical Scenario Guide\n"
-                f"{guide}\n\n"
-                "### Actual Project Code Flow\n"
-                f"{code_note}"
-            )
-            return answer, []
-
-        except Exception as error:
-            last_error = error
-            print(f"General AI error with {model_name}: {error}")
-
-    raise last_error
-
-
-
-
-
-def get_mcp_seed_queries(question, search_results):
-    """Return deterministic literal searches for high-risk workflows."""
-    lowered = question.lower()
-    seeds = []
-
-    def add(*values):
-        for value in values:
-            value = str(value or "").strip()
-            if len(value) >= 3 and value not in seeds:
-                seeds.append(value)
-
-    # Codebase-location questions need literal symbol/concept searches first.
-    if is_codebase_location_question(question):
-        add(*get_codebase_lookup_queries(question))
-
-    # Architecture questions need representative evidence across project layers,
-    # not a fake search for one feature workflow.
-    if is_architecture_question(question):
-        add(
-            "Shipra.Frontend src pages",
-            "AxiosInterceptors",
-            "Controllers",
-            "Features Commands Queries Handler Validator",
-            "Shipra.Backend.API.Core",
-            "Repository",
-            "DbContext",
-            "ServiceCollectionExtensions",
-        )
-
-    # Explicit filenames are hard retrieval targets and are searched first.
-    for named_file in extract_named_source_files(question):
-        add(named_file, named_file.rsplit(".", 1)[0])
-
-    # Mock-data lookups: exact order ids and common labels should search live JSON too.
-    order_ids = re.findall(r"\bORD-\d+\b", question, flags=re.IGNORECASE)
-    add(*(order_id.upper() for order_id in order_ids))
-    for mock_term in ("priority", "vip", "fragile", "cod", "prepaid"):
-        if re.search(r"\b" + re.escape(mock_term) + r"\b", lowered):
-            add(mock_term)
-
-    if "order label" in lowered or "order labels" in lowered:
-        if any(word in lowered for word in ("assign", "existing", "apply")):
-            add(
-                "AddOrderLabelModal",
-                "CreateClientOrderLabel",
-                "GetAllClientOrderLabelLookupForSelection",
-            )
-        if any(word in lowered for word in ("create", "name", "color", "without", "empty", "missing")):
-            add(
-                "Please Enter a Color Name",
-                "Please choose a Color",
-                "CreateOrderLabelsModal",
-                "CreateClientOrderLabelLookup",
-            )
-        if "export" in lowered and "csv" in lowered:
-            add(
-                "handleEditOrderLabel",
-                "saveAs",
-                "XLSX",
-                "CSV",
-            )
-
-    if "price calculator" in lowered and "filter" in lowered:
-        add(
-            "handleFilter",
-            "GetAllClientRate",
-            "priceCalculator2",
-        )
-
-    if "shopify" in lowered and any(
-        phrase in lowered
-        for phrase in ("connect", "sale channel", "sales channel")
-    ):
-        add(
-            "saleChannelConnectModal",
-            "CreateSaleChannelConfig",
-            "Shopify",
-        )
-
-    # Generic feature discovery for every Shipra question.
-    # These seeds let MCP search exact project text/path names even when the
-    # feature was not manually hard-coded above.
-    raw_words = re.findall(r"[A-Za-z0-9]+", question)
-
-    discovery_stop_words = {
-        "a", "an", "and", "are", "can", "do", "does", "for", "from",
-        "how", "i", "in", "is", "it", "me", "my", "of", "on", "or",
-        "please", "shipra", "step", "steps", "the", "this", "to", "what",
-        "when", "where", "which", "who", "why", "with", "you", "your",
-        "batao", "btao", "hai", "hain", "hy", "ka", "kaise", "kar",
-        "kare", "karen", "karna", "ke", "kesy", "ki", "ko", "mai",
-        "main", "mein", "mujhe", "mjhy", "sy", "se",
-    }
-
-    meaningful_words = [
-        word
-        for word in raw_words
-        if word.lower() not in discovery_stop_words
-        and len(word) >= 3
-    ]
-
-    # Search the strongest short phrases first. Keep action words here because
-    # feature names such as "return order" can include an action-like word.
-    if meaningful_words:
-        # Full phrase is useful for exact comments, labels, route names, etc.
-        add(" ".join(meaningful_words[:4]))
-
-        # Consecutive 2- and 3-word phrases catch names such as:
-        # return order, carrier dashboard, store channel, price calculator.
-        for size in (3, 2):
-            if len(meaningful_words) < size:
-                continue
-
-            for start_index in range(
-                0,
-                min(len(meaningful_words) - size + 1, 4),
-            ):
-                phrase_words = meaningful_words[
-                    start_index:start_index + size
-                ]
-                phrase = " ".join(phrase_words)
-                add(phrase)
-
-                # Also search common code-name forms.
-                pascal_name = "".join(
-                    word[:1].upper() + word[1:]
-                    for word in phrase_words
-                )
-                camel_name = (
-                    pascal_name[:1].lower() + pascal_name[1:]
-                    if pascal_name
-                    else ""
-                )
-
-                add(pascal_name, camel_name)
-
-        # Single feature terms are the last generic fallback.
-        for word in meaningful_words[:4]:
-            add(word)
-
-    # Workflow questions need UI/action files, not only domain entities.
-    profile = detect_request_profile(question)
-    action = str(profile.get("action") or "").strip().lower()
-    workflow_actions = {
-        "create": "Create", "update": "Update", "delete": "Delete",
-        "assign": "Assign", "connect": "Connect", "sync": "Sync",
-        "import": "Import", "export": "Export",
-    }
-
-    # For implementation requests such as "create a button in Production Station",
-    # search the target feature independently from the new artifact.
-    if profile.get("mode") == PROJECT_CHANGE:
-        target_match = re.search(
-            r"\b(?:in|on|inside|under)\s+(?:the\s+)?"
-            r"([a-z0-9][a-z0-9 _-]{2,60}?)(?:\?|$|\s+(?:page|screen|module)\b)",
-            lowered,
-        )
-        if target_match:
-            target_phrase = re.sub(r"\s+", " ", target_match.group(1)).strip(" ?.-")
-            target_phrase = re.sub(
-                r"\b(?:give me|with code|full flow|complete flow)\b.*$",
-                "",
-                target_phrase,
-            ).strip()
-            if target_phrase:
-                target_words = [
-                    w for w in re.findall(r"[A-Za-z0-9]+", target_phrase)
-                    if w.lower() not in discovery_stop_words
-                ][:4]
-                if target_words:
-                    target_pascal = "".join(w[:1].upper() + w[1:] for w in target_words)
-                    add(
-                        " ".join(target_words),
-                        target_pascal,
-                        target_pascal + "Page",
-                        target_pascal + "Index",
-                    )
-
-    if action in workflow_actions and meaningful_words:
-        action_words = {
-            "create", "add", "make", "new", "update", "edit", "change",
-            "delete", "remove", "assign", "connect", "sync", "import",
-            "export", "generate", "implement", "build", "develop",
-            "give", "full", "complete", "flow", "code",
-        }
-        entity_words = [
-            word for word in meaningful_words
-            if word.lower() not in action_words
-        ][:4]
-
-        if entity_words:
-            variants = [entity_words]
-            singular = list(entity_words)
-            last = singular[-1].lower()
-            if last.endswith("ies") and len(last) > 4:
-                singular[-1] = singular[-1][:-3] + "y"
-                variants.append(singular)
-            elif last.endswith("ses") and len(last) > 4:
-                singular[-1] = singular[-1][:-2]
-                variants.append(singular)
-            elif last.endswith("s") and not last.endswith("ss") and len(last) > 3:
-                singular[-1] = singular[-1][:-1]
-                variants.append(singular)
-
-            prefix = workflow_actions[action]
-            for words in variants:
-                entity_pascal = "".join(
-                    word[:1].upper() + word[1:] for word in words
-                )
-                add(
-                    entity_pascal,
-                    prefix + entity_pascal,
-                    "Add" + entity_pascal,
-                    "Save" + entity_pascal,
-                    "Post" + entity_pascal,
-                    entity_pascal + "Modal",
-                    prefix + entity_pascal + "Modal",
-                    "Add" + entity_pascal + "Modal",
-                    entity_pascal + "Form",
-                    entity_pascal + "Page",
-                    entity_pascal + "Repository",
-                    prefix + entity_pascal + "Command",
-                    prefix + entity_pascal + "CommandHandler",
-                )
-
-    # Reuse exact code identifiers already surfaced by indexed retrieval as
-    # additional literal-search hints, without trusting those paths as live MCP evidence.
-    for item in search_results[:6]:
-        symbol = str(item.get("symbol") or "").split(".")[-1]
-        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{4,}", symbol):
-            add(symbol)
-
-    return seeds[:24]
-
-
-def mcp_match_priority(file_path, seed_query, question):
-    """Rank literal MCP matches so decisive workflow files are read first."""
-    path = str(file_path).replace("\\", "/").lower()
-    query = str(seed_query).lower()
-    topic_tokens = tokenize(question) - {
-        "how", "what", "when", "where", "explain", "step", "steps",
-        "existing", "using", "use", "happens", "try", "want",
-    }
-    path_tokens = tokenize(path)
-
-    score = 0
-    if query and query in path:
-        score += 800
-    score += 80 * len(topic_tokens.intersection(path_tokens))
-
-    # For workflow questions, prefer screens/modals/forms over domain entities.
-    workflow_question = detect_request_profile(question).get("action") in {
-        "create", "update", "delete", "assign", "connect",
-        "sync", "import", "export",
-    }
-    if workflow_question:
-        if "/src/components/" in path or "/src/pages/" in path:
-            score += 900
-        if any(x in path for x in ("modal", "form", "/list/", "index.js", "index.jsx", "index.tsx")):
-            score += 500
-        if "/api/" in path or "axiosinterceptors" in path:
-            score += 350
-        if "api.core/" in path or "/core/" in path:
-            score -= 650
-
-    # Prefer executable layers over generic neighboring screens.
-    if "/src/components/" in path or "/src/pages/" in path:
-        score += 240
-    if "/src/api/" in path or "/src/services/" in path:
-        score += 300
-    if "/api/" in path or path.endswith("controller.cs"):
-        score += 280
-    if "/features/" in path or "commandhandler.cs" in path or "query.cs" in path:
-        score += 260
-    if "/repository/" in path or path.endswith("repository.cs"):
-        score += 180
-
-    # The assignment test must not be displaced by similarly named station/task code.
-    lowered_question = question.lower()
-    if "order label" in lowered_question and any(
-        word in lowered_question for word in ("assign", "existing", "apply")
-    ):
-        if "addorderlabelmodal" in path:
-            score += 1200
-        if "/pages/orders/index" in path:
-            score += 650
-        if any(term in path for term in ("station", "deliverytask", "inventory")):
-            score -= 1500
-
-    if "price calculator" in lowered_question:
-        if "pricecalculator2" in path:
-            score += 1000
-        if "getallclientrate" in path or "carriercontroller" in path:
-            score += 700
-
-    if "order label" in lowered_question and any(
-        word in lowered_question
-        for word in ("without", "empty", "missing", "name", "color", "validation")
-    ):
-        if "createorderlabelsmodal" in path:
-            score += 1700
-        if query in {"please enter a color name", "please choose a color"}:
-            score += 2400
-        if "createclientorderlabellookup" in path:
-            score += 500
-        if "addorderlabelmodal" in path:
-            score -= 1000
-
-    if "shopify" in lowered_question:
-        if "salechannelconnectmodal" in path:
-            score += 1200
-        if "createsalechannelconfig" in path:
-            score += 850
-        if "updateshopify" in path and "update" not in lowered_question:
-            score -= 700
-
-    return score
-
-
-def prune_mcp_evidence(evidence, question, seed_queries):
-    """Remove semantic neighbors that are not part of the requested operation."""
-    if not evidence:
-        return []
-
-    lowered_question = question.lower()
-    generic = {
-        "create", "connect", "update", "delete", "fetch", "validate",
-        "frontend", "backend", "flow", "code", "file", "function",
-        "project", "shipra", "explain", "guide", "using", "use",
-        "button", "actual", "existing", "new", "add", "implement",
-        "happens", "try", "want", "without", "entering", "selecting",
-    }
-    topic_tokens = tokenize(question) - generic
-    kept = []
-
-    for item in evidence:
-        path = item.get("file_path", "")
-
-        # Structured mock/test records are decisive evidence for data lookup questions.
-        if item.get("source_type") == "mock_data":
-            kept.append(item)
-            continue
-
-        searchable = "\n".join([
-            path,
-            item.get("symbol") or "",
-            item.get("text", ""),
-        ]).lower()
-        exact_seed = any(
-            seed.lower() in searchable
-            for seed in seed_queries
-            if len(seed) >= 3
-        )
-        path_overlap = topic_tokens.intersection(tokenize(path))
-
-        # Strong operation-specific exclusions discovered by regression tests.
-        if "order label" in lowered_question and any(
-            word in lowered_question for word in ("assign", "existing", "apply")
-        ):
-            lower_path = path.lower()
-            if any(term in lower_path for term in ("assignorderstation", "deliverytasks", "/inventory/")):
-                continue
-
-        if "order label" in lowered_question and any(
-            word in lowered_question
-            for word in ("without", "empty", "missing", "name", "color", "validation")
-        ):
-            lower_path = path.lower()
-            if "addorderlabelmodal" in lower_path:
-                continue
-            if "createclientorderlabel/createclientorderlabelcommand" in lower_path:
-                continue
-
-        if "shopify" in lowered_question and "connect" in lowered_question:
-            lower_path = path.lower()
-            if "updateshopifysalechannelconfig" in lower_path and "update" not in lowered_question:
-                continue
-
-        if exact_seed or len(path_overlap) >= 2:
-            kept.append(item)
-
-    # Stable de-duplication by canonical path + line range.
-    output = []
-    seen = set()
-    for item in kept:
-        key = (
-            item.get("file_path"),
-            item.get("start_line"),
-            item.get("end_line"),
-        )
-        if key not in seen:
-            seen.add(key)
-            output.append(item)
-
-    return output[:12]
-
-
-
-def extract_named_source_files(question):
-    return [m.group(0).lower() for m in re.finditer(
-        r"\b[A-Za-z0-9_.-]+\.(?:js|jsx|ts|tsx|cs|py|json|sql|css|scss|html)\b",
-        str(question or ""), flags=re.IGNORECASE)]
-
-def is_explanation_question(question):
-    q=str(question or "").lower()
-    if is_architecture_question(question):
-        return True
-    return bool(extract_named_source_files(question)) and any(p in q for p in (
-        "why", "what does", "what is", "explain", "purpose", "used for",
-        "use of", "working", "kis liye", "kyun", "q use"))
-
-
-def get_request_semantic_contract(question):
-    """Extract the user's required operation and distinctive entity concepts."""
-    profile = detect_request_profile(question)
-    lowered = str(question or "").lower()
-
-    action = profile.get("action")
-    action_terms = {
-        "create": {"create", "created", "creating", "add", "new", "generate", "save", "submit"},
-        "assign": {"assign", "assigned", "apply", "allocation", "allocate"},
-        "connect": {"connect", "connected", "connection", "link", "activate"},
-        "update": {"update", "updated", "edit", "change", "modify"},
-        "delete": {"delete", "deleted", "remove", "removed"},
-        "filter": {"filter", "search", "find"},
-        "list": {"list", "getall", "fetch", "show"},
-        "export": {"export", "csv", "excel", "download"},
-        "import": {"import", "upload"},
-        "sync": {"sync", "synchronize", "synchronise"},
-        "return": {"return", "returned"},
-        "track": {"track", "tracking"},
-        "validate": {"validate", "validation", "validator"},
-        "calculate": {"calculate", "calculator", "rate"},
-        "view": {"view", "details", "get", "fetch", "open"},
-    }
-
-    # Distinctive business nouns must survive retrieval. This prevents:
-    # "sale channel orders" -> "sale channel config" drift, and applies to
-    # other compound feature questions as well.
-    stop = {
-        "how", "what", "when", "where", "which", "who", "why",
-        "create", "add", "make", "update", "edit", "change", "delete",
-        "remove", "assign", "connect", "filter", "search", "find",
-        "list", "show", "export", "download", "import", "upload",
-        "sync", "track", "validate", "view", "open", "generate",
-        "shipra", "section", "page", "screen", "feature", "flow",
-        "the", "a", "an", "to", "of", "for", "in", "on", "with",
-        "is", "are", "do", "does", "can", "me", "my", "please",
-        "kesy", "kaise", "banao", "banana", "batao", "btao", "kro",
-        "karna", "hai", "hain", "ka", "ki", "ke", "ko", "mai",
-        "main", "mein", "sy", "se", "mjhy", "mujhe",
-    }
-    nouns = [
-        token for token in tokenize(lowered)
-        if token not in stop and len(token) >= 3
-    ]
-
-    # Preserve canonical compound entity words too.
-    entity = str(profile.get("entity") or "")
-    for token in tokenize(entity):
-        if token not in stop and token not in nouns:
-            nouns.append(token)
-
-    return {
-        "action": action,
-        "action_terms": action_terms.get(action, set()),
-        "concepts": nouns[:6],
-        "named_files": extract_named_source_files(question),
-    }
-
+            r=client.models.generate_content(model=model,contents=prompt)
+            a=(r.text or "").strip()
+            if a: return a,[]
+        except Exception as ex:
+            last=ex; print(f"General AI error with {model}: {ex}")
+    raise RuntimeError(f"General AI failed: {last}")
 
 def get_concept_variants(concept):
     """Return conservative lexical/code-name variants for one business concept."""
@@ -4438,7 +3905,7 @@ Do not mix creating a label with assigning a label to orders.
 For existing UI flows, inspect the page/modal and relevant called functions.
 Read additional lines when validation or response handling is cut off.
 Each read may contain at most 120 lines.
-You have at most 18 turns. Prioritize decisive evidence.
+You have at most 8 planner turns after deterministic bootstrap. Prioritize decisive evidence.
 Indexed leads are search hints, not live evidence or guaranteed paths.
 For UI usage questions, prioritize the matching frontend page/modal.
 Read the relevant function, then search its exact API call name.
@@ -4925,7 +4392,7 @@ Finish when sufficient verified evidence is collected or the exact search is exh
             return prune_mcp_evidence(evidence, question, seed_queries)
 
         planner_failures = 0
-        for _ in range(18):
+        for _ in range(MCP_PLANNER_MAX_TURNS):
             try:
                 response = await asyncio.to_thread(
                     client.models.generate_content,
@@ -4945,7 +4412,7 @@ Finish when sufficient verified evidence is collected or the exact search is exh
                     ),
                     "error": f"{type(planner_error).__name__}: {planner_error}",
                 })
-                if planner_failures >= 3:
+                if planner_failures >= MCP_PLANNER_MAX_FAILURES:
                     break
                 continue
 
@@ -7872,6 +7339,17 @@ PRACTICAL GUIDE QUALITY RULES:
 - Put ALL technical evidence, code, file paths, functions/classes, APIs, backend
   behavior, and evidence-gap details under "### Actual Project Code Flow".
 
+DEBUG/FIX MODE:
+When REQUEST PROFILE action is "debug":
+- Treat this as diagnosis + repair, not an end-user workflow.
+- MCP-verified Shipra code is authoritative for existing project behavior.
+- Trace only the affected page/API/handler/service/repository/callers needed.
+- Start with "### Problem Diagnosis"; separate verified vs likely causes.
+- Then provide "### Proposed Fix" with the smallest coherent patch.
+- End with "### Verification" containing focused regression/edge-case checks.
+- Never invent stack traces, runtime values, database contents, files or symbols.
+- Do NOT force Practical Scenario Guide for debugging answers.
+
 If the user explicitly requests a code change AND the detected request type
 is project_change:
 - Explain what existing functionality was verified.
@@ -7967,6 +7445,14 @@ USER QUESTION:
 
         scenario_marker = "### Practical Scenario Guide"
         code_marker = "### Actual Project Code Flow"
+
+        if request_profile.get("action") == "debug":
+            if "### Problem Diagnosis" not in answer_text or "### Proposed Fix" not in answer_text:
+                raise ValueError("Groq debug response omitted required diagnosis/fix sections.")
+            if code_marker in answer_text:
+                answer_text=inject_verified_code(answer_text,code_cards,
+                                                 minimum_cards=minimum_code_cards)
+            return clean_assistant_display_text(answer_text),results
 
         if is_explanation_question(question):
             if code_marker not in answer_text:
@@ -8156,15 +7642,8 @@ Rules:
 Return ONLY the corrected final prompt.
 """
 
-    validation_response = client.models.generate_content(
-        model=PRIMARY_MODEL,
-        contents=validation_prompt,
-    )
-
-    final_prompt = (
-        validation_response.text
-        or generated_prompt
-    ).strip()
+    # One model round-trip; generation prompt already enforces evidence boundaries.
+    final_prompt=generated_prompt.strip()
 
     if response_language == "Roman Urdu":
         guide_text = (
@@ -8406,7 +7885,7 @@ if question:
         avatar=":material/auto_awesome:",
     ):
         status_box = st.status(
-            "Checking Shipra...",
+            "Thinking...",
             expanded=False,
         )
         try:
