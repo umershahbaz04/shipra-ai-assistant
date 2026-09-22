@@ -2704,6 +2704,7 @@ GENERAL = "general"
 PROJECT_EXISTING = "project_existing"
 PROJECT_CHANGE = "project_change"
 PROJECT_PROMPT = "project_prompt"
+DEBUGGING = "debugging"
 
 
 def get_recent_history_text(limit=6):
@@ -3826,6 +3827,17 @@ def detect_request_profile(question):
             "action": "count",
             "entity": contract.get("entity") or raw,
             "status": contract.get("status"),
+        }
+
+    # Pasted code + fix/debug request must use the dedicated debugging mode.
+    if is_pasted_code_debug_request(raw):
+        return {
+            "scope": "project",
+            "mode": DEBUGGING,
+            "action": "debug",
+            "entity": extract_code_symbols(raw) or "pasted_code",
+            "language": detect_code_language(raw),
+            "pasted_code": extract_pasted_code(raw),
         }
 
     if is_debugging_question(raw):
