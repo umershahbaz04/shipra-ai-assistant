@@ -1,5 +1,5 @@
 import os
-SHIPRA_ROUTER_VERSION = "v17-clean-universal-problem-solver"
+SHIPRA_ROUTER_VERSION = "v18-global-routing-fix"
 import sys
 import json
 import math
@@ -3220,6 +3220,61 @@ def get_data_query_contract(question):
     return {"entity": entity, "status": status, "operation": "count"}
 
 
+
+def get_live_data_operation(question):
+    """Classify live business-data operations without coupling them to code retrieval."""
+    q=_normalize_intent_text(question)
+    contract=get_data_query_contract(question)
+    entity=contract.get("entity")
+    if not entity:
+        return None
+
+    if is_data_aggregate_question(question):
+        return {"operation":"count","entity":entity,"status":contract.get("status"),"filters":{}}
+
+    code_words=("code","file","class","function","handler","controller","repository",
+                "frontend","backend","implement","add field","add input","create field")
+    if any(x in q for x in code_words):
+        return None
+
+    name=None
+    m=re.search(
+        r"\b([A-Za-z][A-Za-z0-9._-]{1,40})\s+(?:k|ke|ki)\s+"
+        r"(?:name|naam)\s+ka\s+(?:store|shop|channel)\b",
+        str(question or ""),flags=re.IGNORECASE)
+    if m: name=m.group(1).strip()
+
+    exists=bool(re.search(
+        r"\b(?:is there|do we have|does .* exist|exists?|koi .* hai|"
+        r"kia .* hai|kya .* hai|maujood|exist karta|exist krta)\b",q))
+    search=bool(re.search(r"\b(?:find|search|lookup|named|called|name ka|naam ka)\b",q))
+    listing=bool(re.search(r"\b(?:list|show all|which|kon kon|kaun kaun|sary|saare)\b",q))
+
+    if exists:
+        return {"operation":"exists","entity":entity,"status":contract.get("status"),
+                "filters":{"name":name} if name else {}}
+    if search:
+        return {"operation":"search","entity":entity,"status":contract.get("status"),
+                "filters":{"name":name} if name else {}}
+    if listing:
+        return {"operation":"list","entity":entity,"status":contract.get("status"),"filters":{}}
+    return None
+
+
+def is_contextual_followup(question):
+    q=_normalize_intent_text(question)
+    return len(q.split()) <= 12 and any(x in q for x in (
+        "what about","its backend","backend code","backend bhi","aur backend",
+        "or backend","frontend bhi","and database","database side","iska backend",
+        "iski backend","what about its","iska code","iski code"))
+
+
+def resolve_followup_question(question):
+    if not is_contextual_followup(question):
+        return question
+    previous=get_previous_user_question()
+    return f"{previous}\nFollow-up: {question}" if previous else question
+
 def build_data_query_answer(question, results):
     """
     Render factual aggregate results only from connected runtime/mock data evidence.
@@ -3448,6 +3503,7 @@ def _safe_runtime_tool_name(name):
     allowed = (
         "count", "get_count", "record_count", "query_data", "query_records",
         "search_data", "search_records", "runtime_data", "business_data",
+        "find", "lookup", "get_record", "get_records",
         "list_stores", "list_orders", "list_products", "list_customers",
     )
     return any(word in n for word in allowed)
@@ -3608,6 +3664,74 @@ async def get_verified_runtime_count(entity, status=None):
     return None
 
 
+
+async def get_verified_runtime_records(entity, operation="list", filters=None, status=None):
+    """Read-only generic runtime lookup; never invokes mutation-shaped tools."""
+    filters=filters or {}
+    params=get_mcp_server_params()
+    async with Client(params) as mcp_client:
+        listed=await mcp_client.list_tools()
+        tools=list(getattr(listed,"tools",listed) or [])
+        singular=str(entity or "").rstrip("s").casefold()
+        def score(tool):
+            name=str(getattr(tool,"name","") or "").casefold()
+            if not _safe_runtime_tool_name(name): return -1000
+            p=40 if singular and singular in name else 0
+            if any(x in name for x in ("search","find","query","list","record","data")): p+=30
+            return p
+        for tool in sorted(tools,key=score,reverse=True):
+            if score(tool)<0: continue
+            args=_build_runtime_tool_arguments(tool,entity,status)
+            if args is None: continue
+            props=_tool_schema_properties(tool)
+            wanted=filters.get("name")
+            if wanted:
+                for key in ("name","query","search","term","keyword","store_name","storeName"):
+                    if key in props:
+                        args[key]=wanted; break
+            try: result=await mcp_client.call_tool(tool.name,args)
+            except Exception: continue
+            if getattr(result,"is_error",False): continue
+            payload=getattr(result,"structured_content",None)
+            if payload is None:
+                raw="\\n".join(b.text for b in getattr(result,"content",[])
+                              if getattr(b,"type","")=="text").strip()
+                try: payload=json.loads(raw) if raw else None
+                except Exception: payload=parse_json_object(raw)
+            records=[]
+            if isinstance(payload,list): records=payload
+            elif isinstance(payload,dict):
+                for key in (entity,str(entity).rstrip("s"),"records","items","data","results"):
+                    if isinstance(payload.get(key),list):
+                        records=payload[key]; break
+            if not records: continue
+            if wanted:
+                w=str(wanted).casefold()
+                def matches(r):
+                    if not isinstance(r,dict): return False
+                    vals=(r.get("name"),r.get("Name"),r.get("storeName"),
+                          r.get("StoreName"),r.get("title"),r.get("Title"))
+                    return any(w in str(v or "").casefold() for v in vals)
+                records=[r for r in records if matches(r)]
+            return {"operation":operation,"entity":entity,"filters":filters,
+                    "records":records[:20],"exists":bool(records),"tool":tool.name}
+    return None
+
+
+def build_runtime_records_answer(result,response_language):
+    op=result.get("operation"); entity=str(result.get("entity") or "records")
+    records=result.get("records") or []; name=(result.get("filters") or {}).get("name")
+    if op=="exists":
+        if response_language=="Roman Urdu":
+            return (f"Haan, **{name}** naam ka {entity.rstrip('s')} verified runtime data mein mila."
+                    if records else
+                    f"Nahi, **{name}** naam ka {entity.rstrip('s')} verified runtime data mein nahi mila.")
+        return (f"Yes, **{name}** was found in verified {entity} data."
+                if records else f"No **{name}** was found in verified {entity} data.")
+    if response_language=="Roman Urdu":
+        return f"Verified runtime data mein **{len(records)} matching {entity}** mile."
+    return f"Found **{len(records)} matching {entity}** in verified runtime data."
+
 def build_runtime_count_answer(result, response_language):
     count = result["count"]
     entity = str(result.get("entity") or "records")
@@ -3622,14 +3746,24 @@ def route_requires_runtime_data(route):
     return str((route or {}).get("intent")) == "data_query"
 
 def detect_request_profile(question):
-    """Deterministically identify Shipra scope, entity, action, and request mode."""
-    raw = str(question or "").strip()
+    """One request profile; short elliptical follow-ups inherit prior user context."""
+    raw = resolve_followup_question(str(question or "").strip())
     lowered = raw.lower()
     named_source_file = bool(re.search(r"\b[A-Za-z0-9_.-]+\.(?:js|jsx|ts|tsx|cs|py|json|sql|css|scss|html)\b", raw, flags=re.IGNORECASE))
     explanation_request = any(p in lowered for p in (
         "why using", "why use", "what does", "what is", "explain",
         "purpose of", "used for", "use of", "working of", "kis liye", "kyun", "q use"
     ))
+
+    live_data=get_live_data_operation(raw)
+    if live_data:
+        return {
+            "scope":"data","mode":"data_query",
+            "action":live_data["operation"],
+            "entity":live_data["entity"],
+            "status":live_data.get("status"),
+            "filters":live_data.get("filters") or {},
+        }
 
     # Business-data detail lookup: exact fields/timestamps for one record.
     if is_order_detail_data_question(raw):
@@ -7075,6 +7209,14 @@ def ask_shipra_project_ai(question, intent):
 
     request_profile = detect_request_profile(question)
 
+    if request_profile.get("scope") == "data":
+        hybrid_route=dict(hybrid_route)
+        hybrid_route["intent"]="data_query"
+        hybrid_route["action"]=request_profile.get("action") or "lookup"
+        hybrid_route["entity"]=request_profile.get("entity")
+        hybrid_route["status"]=request_profile.get("status")
+        hybrid_route["filters"]=request_profile.get("filters") or {}
+
     # PROJECT RAG SEED:
     # Retrieve local candidates once. Ordinary questions may answer from them;
     # deep/debug/change questions pass them to MCP as discovery hints.
@@ -7106,6 +7248,23 @@ def ask_shipra_project_ai(question, intent):
         )
         if rag_answer:
             return rag_answer,rag_results
+
+    # UNIVERSAL LIVE-DATA FAST PATH for exists/search/list.
+    if (
+        hybrid_route.get("intent")=="data_query"
+        and hybrid_route.get("action") in {"exists","search","list"}
+    ):
+        try:
+            runtime_records=asyncio.run(get_verified_runtime_records(
+                hybrid_route.get("entity"),
+                hybrid_route.get("action"),
+                hybrid_route.get("filters") or {},
+                hybrid_route.get("status"),
+            ))
+        except Exception:
+            runtime_records=None
+        if runtime_records is not None:
+            return build_runtime_records_answer(runtime_records,response_language),[]
 
     # UNIVERSAL DATA QUERY FAST PATH:
     # Count any recognized Shipra business entity from a connected read-only
@@ -7394,6 +7553,24 @@ def ask_shipra_project_ai(question, intent):
                 for message in collect_error_messages(primary_mcp_error):
                     st.text(message)
 
+        if request_profile.get("mode") == PROJECT_CHANGE:
+            seed=project_rag_seed or rag_candidates
+            proposed=answer_project_from_rag(question,request_profile,seed)
+            if proposed:
+                return proposed,seed
+            if response_language=="Roman Urdu":
+                return (
+                    "Ye **project change** request hai. Exact surrounding Shipra files verify "
+                    "nahi ho sake, is liye existing paths invent nahi kiye jayenge. New field "
+                    "ke liye target form/component, request DTO/model, validation/handler aur "
+                    "persistence mapping ko trace karke sirf required layers change hongi."
+                ),[]
+            return (
+                "This is a **project change** request. The exact surrounding Shipra files "
+                "could not be verified, so existing paths will not be invented. Trace the "
+                "target form/component, request DTO/model, validation/handler, and persistence "
+                "mapping, changing only the layers the new field actually crosses."
+            ),[]
         return build_verified_evidence_gap_answer(question), []
 
     # CODEBASE LOCATION FAST RENDER:
@@ -7547,9 +7724,10 @@ If a suitable implementation was not retrieved, say that it was not found
 in the available sources, not that it does not exist anywhere in Shipra.
 Do not propose new code unless the user explicitly requested a code change.
 
-Use exactly these two top-level headings in this order:
-### Practical Scenario Guide
-### Actual Project Code Flow
+OUTPUT FORMAT:
+- project_change => `### Verified Existing Extension Points`, `### Proposed Implementation`, `### Verification`.
+- debugging => Problem Diagnosis / Proposed Fix / Verification.
+- existing user-workflow questions only => Practical Scenario Guide / Actual Project Code Flow.
 
 In the scenario guide:
 - Give maximum 6 short numbered steps.
@@ -7852,6 +8030,16 @@ USER QUESTION:
             return clean_assistant_display_text(inject_verified_code(
                 answer_text, code_cards, minimum_cards=minimum_code_cards
             )), results
+
+        if request_profile.get("mode") == PROJECT_CHANGE:
+            needed=("### Verified Existing Extension Points",
+                    "### Proposed Implementation","### Verification")
+            if not all(x in answer_text for x in needed):
+                raise ValueError("Project-change response omitted required sections.")
+            if code_marker in answer_text:
+                answer_text=inject_verified_code(answer_text,code_cards,
+                                                 minimum_cards=minimum_code_cards)
+            return clean_assistant_display_text(answer_text),results
 
         if (scenario_marker not in answer_text or code_marker not in answer_text):
             raise ValueError("Groq response omitted a required answer section.")
