@@ -1,5 +1,5 @@
 import os
-SHIPRA_ROUTER_VERSION = "v16-chatgpt-style-problem-solver"
+SHIPRA_ROUTER_VERSION = "v17-clean-universal-problem-solver"
 import sys
 import json
 import math
@@ -3815,12 +3815,31 @@ def detect_request_profile(question):
     )
 
     if explicit_code_change:
-        recent_context=get_recent_history_text(limit=4)
-        if explicit_shipra or has_explicit_project_context(raw,recent_context):
-            return {"scope":"project","mode":PROJECT_CHANGE,
-                    "action":action or "change","entity":entity}
-        return {"scope":"general","mode":GENERAL,
-                "action":action or "change","entity":entity}
+        recent_context = get_recent_history_text(limit=4)
+
+        # A concrete change against a known Shipra domain entity is project-scoped
+        # even when the same sentence does not repeat the literal word "Shipra".
+        # "order mai new input field add krni hai" is therefore a Shipra change.
+        known_shipra_change = entity is not None and not general_tech_context
+
+        if (
+            explicit_shipra
+            or known_shipra_change
+            or has_explicit_project_context(raw, recent_context)
+        ):
+            return {
+                "scope": "project",
+                "mode": PROJECT_CHANGE,
+                "action": action or "change",
+                "entity": entity or raw,
+            }
+
+        return {
+            "scope": "general",
+            "mode": GENERAL,
+            "action": action or "change",
+            "entity": entity,
+        }
 
     if project_scope:
         return {
@@ -5861,6 +5880,24 @@ def _format_order_person_details(record):
     return " — ".join(parts)
 
 
+
+def asks_for_time_window(question):
+    q = _normalize_intent_text(question)
+    return any(re.search(p, q) for p in (
+        r"\blast\s+\d+\s+(?:day|days|week|weeks|month|months)\b",
+        r"\bpast\s+\d+\s+(?:day|days|week|weeks|month|months)\b",
+        r"\btoday\b", r"\byesterday\b", r"\bthis\s+week\b",
+        r"\bthis\s+month\b", r"\blast\s+month\b",
+        r"\baaj\b", r"\baj\b", r"\bkal\b",
+    ))
+
+def runtime_result_proves_time_filter(result):
+    return isinstance(result, dict) and bool(
+        result.get("time_filter_applied")
+        or result.get("date_filter_applied")
+        or result.get("filtered_by_date")
+    )
+
 def build_order_count_answer(status_result, response_language):
     """Return exact status count plus the matching customers/orders from MCP data."""
     key = status_result["status_key"]
@@ -7038,6 +7075,22 @@ def ask_shipra_project_ai(question, intent):
 
     request_profile = detect_request_profile(question)
 
+    # PROJECT RAG SEED:
+    # Retrieve local candidates once. Ordinary questions may answer from them;
+    # deep/debug/change questions pass them to MCP as discovery hints.
+    project_rag_seed = []
+    if (
+        request_profile.get("scope") == "project"
+        and not route_requires_runtime_data(hybrid_route)
+    ):
+        project_rag_seed = filter_relevant_results(
+            search_documentation(
+                search_question,
+                top_k=RAG_FAST_PATH_MAX_RESULTS,
+            ),
+            search_question,
+        )
+
     # RAG-FIRST PROJECT FAST PATH:
     # Ordinary Shipra code questions use local FAISS first; MCP is reserved for
     # debugging, modifications, deep call chains, or insufficient RAG evidence.
@@ -7047,11 +7100,10 @@ def ask_shipra_project_ai(question, intent):
         and not should_use_deep_project_tools(question, request_profile)
         and not is_architecture_question(question)
     ):
-        rag_results=filter_relevant_results(
-            search_documentation(search_question, top_k=RAG_FAST_PATH_MAX_RESULTS),
-            search_question,
+        rag_results = project_rag_seed
+        rag_answer = answer_project_from_rag(
+            question, request_profile, rag_results
         )
-        rag_answer=answer_project_from_rag(question,request_profile,rag_results)
         if rag_answer:
             return rag_answer,rag_results
 
@@ -7104,6 +7156,21 @@ def ask_shipra_project_ai(question, intent):
             status_result = None
 
         if status_result is not None:
+            if (
+                asks_for_time_window(question)
+                and not runtime_result_proves_time_filter(status_result)
+            ):
+                if response_language == "Roman Urdu":
+                    return (
+                        "Status records mil gaye hain, lekin requested date window "
+                        "(misal: last 30 days) runtime evidence mein apply/verify nahi hui. "
+                        "Main all-time count ko filtered count keh kar show nahi karunga."
+                    ), []
+                return (
+                    "Status records were found, but the requested date window was "
+                    "not verified as applied by the runtime source. I won't present "
+                    "an all-time count as a time-filtered count."
+                ), []
             return build_order_count_answer(
                 status_result,
                 response_language,
@@ -7169,13 +7236,15 @@ def ask_shipra_project_ai(question, intent):
             target = f"{status} {target}"
         if response_language == "Roman Urdu":
             return (
-                f"**{target}** ka exact jawab connected read-only runtime/database "
-                "source se verify nahi ho saka. Source code se live business data "
-                "guess nahi kiya jayega."
+                f"**{target}** ka live value abhi available nahi hai: connected "
+                "read-only runtime tool ne is entity ka verified data return nahi kiya. "
+                "Exact answer ke liye runtime DB/API mein is entity ka read-only "
+                "count/list operation expose karna hoga."
             ), []
         return (
-            f"The exact value for **{target}** could not be verified from a connected "
-            "read-only runtime/database source. It will not be inferred from source code."
+            f"The live value for **{target}** is unavailable because the connected "
+            "read-only runtime tool returned no verified data for this entity. "
+            "Expose a read-only count/list operation for it in the runtime DB/API."
         ), []
 
     # Validate raw source availability before code-flow retrieval. Mock-data
@@ -7215,7 +7284,7 @@ def ask_shipra_project_ai(question, intent):
             collect_mcp_evidence(
                 question,
                 conversation_text,
-                [],
+                project_rag_seed,
             )
         )
         print(f"MCP PRIMARY TOTAL: {time.time() - mcp_started:.2f} sec")
@@ -7672,17 +7741,20 @@ When REQUEST PROFILE action is "debug":
 
 If the user explicitly requests a code change AND the detected request type
 is project_change:
-- Explain what existing functionality was verified.
-- State any evidence gap without claiming the feature cannot exist.
-- Provide a Proposed implementation for the requested change.
-- Include suggested placement, imports, integration steps, and a simple test.
-- Clearly label unverified imports, dependencies, and sample data.
-- Match implementation depth to the requested behavior. A purely local UI button
-  does not require a new backend API. If the button must persist data or trigger
-  business behavior, trace and propose only the backend layers actually needed.
-- For "full flow with code", show the verified existing extension point first,
-  then a coherent proposed frontend-to-backend flow only where the requested
-  behavior requires those layers.
+- NEVER stop at a generic "exact flow could not be verified" answer.
+- Start from the closest files/symbols that were actually verified.
+- Explain the verified existing extension point.
+- State only the specific missing connection as an evidence gap.
+- Then provide a concrete Proposed implementation.
+- For a new field/input, evaluate the minimum applicable chain:
+  frontend form/state -> request DTO/model -> command/validator/handler ->
+  domain/entity mapping -> persistence/migration.
+- Include ONLY the layers the requested field really needs.
+- Give exact replacement/minimal code when surrounding code is verified.
+- If exact surrounding code is missing, label the snippet as a template and
+  explicitly state what must be verified before pasting it.
+- Include suggested placement, integration steps, and focused tests.
+- A UI-only field must not invent backend/database changes.
 
 If the user asks how to USE an existing feature and evidence is incomplete:
 - Do NOT add a Proposed implementation.
