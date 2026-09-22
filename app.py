@@ -1,5 +1,5 @@
 import os
-SHIPRA_ROUTER_VERSION = "v18-global-routing-fix"
+SHIPRA_ROUTER_VERSION = "v19-project-aware-debug-agent"
 import sys
 import json
 import math
@@ -3427,6 +3427,12 @@ def get_hybrid_route(question):
         return {"intent": "architecture_guidance", "action": "guide",
                 "entity": raw, "status": None,
                 "confidence": 1.0, "source": "fast_path"}
+    if is_pasted_code_debug_request(raw):
+        return {"scope": "project", "mode": DEBUGGING, "action": "debug",
+                "entity": extract_code_symbols(raw) or "pasted_code",
+                "language": detect_code_language(raw),
+                "pasted_code": extract_pasted_code(raw)}
+
     if is_debugging_question(raw):
         return {"intent":"debugging","action":"debug","entity":raw,"status":None,
                 "confidence":1.0,"source":"fast_path"}
@@ -3744,6 +3750,44 @@ def build_runtime_count_answer(result, response_language):
 
 def route_requires_runtime_data(route):
     return str((route or {}).get("intent")) == "data_query"
+
+
+def extract_pasted_code(question):
+    raw = str(question or "")
+    fenced = re.findall(r"```(?:[A-Za-z0-9_+#.-]+)?\s*\n(.*?)```", raw, flags=re.DOTALL)
+    if fenced:
+        return "\n\n".join(x.strip() for x in fenced if x.strip())
+    signals = ("[HttpGet(", "[HttpPost(", "[HttpPut(", "[HttpDelete(", "public async ", "public class ", "IRequest<", "IRequestHandler<", "async Task<", "ActionResult", "namespace ", "def ", "async def ", "function ", "const ", "let ", "<input", "<form")
+    structural = (("{" in raw and "}" in raw) or (";" in raw and "(" in raw and ")" in raw))
+    return raw.strip() if structural and any(s.casefold() in raw.casefold() for s in signals) else ""
+
+def is_pasted_code_debug_request(question):
+    if not extract_pasted_code(question):
+        return False
+    q = _normalize_intent_text(question)
+    return any(x in q for x in ("fix", "debug", "error", "issue", "problem", "not working", "doesn't work", "wrong", "correct", "repair", "theek", "thik", "sahi", "masla", "fix kro", "fix karo", "theek kro", "sahi kro"))
+
+def detect_code_language(question):
+    q = extract_pasted_code(question).casefold()
+    if any(x in q for x in ("[httppost(", "[httpget(", "actionresult", "irequest<", "task<", "namespace ")):
+        return "C# / ASP.NET Core"
+    if "def " in q or "async def " in q: return "Python"
+    if any(x in q for x in ("const ", "let ", "function ", "usestate(")): return "JavaScript/TypeScript"
+    if "<input" in q or "<form" in q: return "HTML"
+    return "code"
+
+def extract_code_symbols(question):
+    code = extract_pasted_code(question); out = []
+    patterns = (r"\b(?:class|interface|record)\s+([A-Za-z_][A-Za-z0-9_]*)", r"\b(?:Task|ActionResult|IActionResult|ServiceResultDTO)(?:<[^>]+>)?\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", r"\b([A-Za-z_][A-Za-z0-9_]*(?:Command|Query|Handler|Controller|Service|Repository|Dto|DTO|Model))\b")
+    for pattern in patterns:
+        for value in re.findall(pattern, code):
+            if value not in out: out.append(value)
+    return out[:12]
+
+def build_debug_search_question(question):
+    symbols = " ".join(extract_code_symbols(question))
+    compact = re.sub(r"\s+", " ", extract_pasted_code(question))[:1200]
+    return f"Shipra debug exact symbols {symbols}. Pasted code: {compact}"
 
 def detect_request_profile(question):
     """One request profile; short elliptical follow-ups inherit prior user context."""
@@ -4220,6 +4264,35 @@ def proposed_implementation_is_incomplete(answer):
     )
 
 
+
+
+def answer_pasted_code_debug(question, request_profile, evidence):
+    code = request_profile.get("pasted_code") or extract_pasted_code(question)
+    if not code: return None
+    compact = [{"file_path": x.get("file_path"), "section": x.get("section"), "symbol": x.get("symbol"), "text": str(x.get("text") or "")[:5000]} for x in (evidence or [])[:12]]
+    prompt = f"""You are Shipra AI's project-aware debugging agent and senior software engineer. Respond in {get_response_language(question)}.
+USER REQUEST:
+{question}
+
+PASTED CODE:
+{code}
+
+DETECTED LANGUAGE: {request_profile.get('language')}
+
+RETRIEVED SHIPRA EVIDENCE:
+{json.dumps(compact, ensure_ascii=False)}
+
+Analyze pasted code first. Compare exact symbols and conventions against Shipra evidence. Do NOT invent a bug. If valid and failing behavior/error is unknown, say so. If a defect is supported, give root cause and the smallest project-compatible exact replacement/minimal diff. If evidence is incomplete, still analyze the snippet and state exactly what is missing. Never fabricate files, APIs, DB schema, execution, or tests. Never output Practical Scenario Guide or Actual Project Code Flow.
+Use exactly:
+### Problem Diagnosis
+### Proposed Fix
+### Verification"""
+    try:
+        response = client.models.generate_content(model=PRIMARY_MODEL, contents=prompt)
+        answer = (response.text or "").strip()
+    except Exception:
+        return None
+    return clean_assistant_display_text(answer) if answer else None
 
 def _rag_has_useful_project_evidence(results):
     if not results:
@@ -7216,6 +7289,16 @@ def ask_shipra_project_ai(question, intent):
         hybrid_route["entity"]=request_profile.get("entity")
         hybrid_route["status"]=request_profile.get("status")
         hybrid_route["filters"]=request_profile.get("filters") or {}
+
+    # PASTED-CODE DEBUG FAST PATH: never fall into workflow-guide output.
+    if request_profile.get("mode") == DEBUGGING and request_profile.get("pasted_code"):
+        debug_search = build_debug_search_question(question)
+        debug_evidence = filter_relevant_results(search_documentation(debug_search, top_k=RAG_FAST_PATH_MAX_RESULTS), debug_search)
+        debug_answer = answer_pasted_code_debug(question, request_profile, debug_evidence)
+        if debug_answer:
+            return debug_answer, debug_evidence
+        message = ("Pasted code debug request detect ho gayi hai. Exact runtime error/behavior dein taa-ke definitive project-specific fix diya ja sake." if response_language == "Roman Urdu" else "Pasted-code debugging was detected. Provide the exact runtime error/behavior for a definitive project-specific fix.")
+        return message, debug_evidence
 
     # PROJECT RAG SEED:
     # Retrieve local candidates once. Ordinary questions may answer from them;
